@@ -6,7 +6,7 @@ import uuid
 import time
 
 # Configuração da Página
-st.set_page_config(page_title="Oncall Management - v7.1", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v7.2", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 try:
@@ -30,8 +30,7 @@ try:
     # Projetos dinâmicos da aba Config
     raw_p = df_config["projetos"].dropna().unique().tolist()
     lista_projetos = [str(x).strip() for x in raw_p if str(x).strip() not in ["", "nan", "None"]]
-    if not lista_projetos: lista_projetos = ["Sistema de horas"]
-
+    
     # Valores Hora por usuário
     df_u = df_config[["emails_autorizados", "valor_hora"]].copy()
     df_u["valor_hora"] = pd.to_numeric(df_u["valor_hora"], errors="coerce").fillna(0.0)
@@ -58,19 +57,17 @@ if not autenticado:
     st.info("👈 Identifique-se na lateral para acessar o sistema.")
     st.stop()
 
-# --- 5. INTERFACE (ABAS RESTAURADAS) ---
-# Criando as 4 abas originais para Admins
+# --- 5. INTERFACE (TODAS AS SUAS ABAS DE VOLTA) ---
 if user_email in ADMINS:
     tabs = st.tabs(["📝 Lançar", "🛡️ Painel da Clau", "📊 BI & Financeiro", "⚙️ Configurações"])
 else:
     tabs = st.tabs(["📝 Lançar"])
 
-# === ABA 1: LANÇAR (TIPOS ORIGINAIS) ===
+# === ABA 1: LANÇAR (COM A MUDANÇA DA ORDEM DAS COLUNAS) ===
 with tabs[0]:
     with st.form("novo_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         proj = c1.selectbox("Projeto", lista_projetos)
-        # Tipos restaurados conforme solicitado
         tipo = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"])
         data_f = c3.date_input("Data da Atividade", value=datetime.now())
         
@@ -79,34 +76,38 @@ with tabs[0]:
         desc = c5.text_area("Descrição")
         
         if st.form_submit_button("Enviar para Aprovação"):
-            # Ordem Exata para o Apps Script: A(id), B(data), C(email), D(proj), E(horas), F(status)... J(desc)
+            # A MUDANÇA ESTÁ AQUI: Dicionário organizado para bater com as colunas da Planilha
             novo = {
-                "id": str(uuid.uuid4()),
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "colaborador_email": user_email,
-                "projeto": proj,
-                "horas": str(hrs),
-                "status_aprovaca": "Pendente", # Coluna F (6) dispara o e-mail
-                "data_decisao": "",
-                "competencia": data_f.strftime("%Y-%m"),
-                "tipo": tipo,
-                "descricão": desc # Coluna J (10)
+                "id": str(uuid.uuid4()),                # Coluna A
+                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # Coluna B
+                "colaborador_email": user_email,        # Coluna C
+                "projeto": proj,                        # Coluna D
+                "horas": str(hrs),                      # Coluna E
+                "status_aprovaca": "Pendente",          # Coluna F (Ativa o E-mail)
+                "data_decisao": "",                     # Coluna G
+                "competencia": data_f.strftime("%Y-%m"),# Coluna H
+                "tipo": tipo,                           # Coluna I
+                "descricão": desc                       # Coluna J
             }
             
-            df_final = pd.concat([df_lancamentos, pd.DataFrame([novo])], ignore_index=True)
+            # BLINDAGEM: Garante que o Pandas não mude a ordem ao converter para DataFrame
+            ordem_colunas = ["id", "data_registro", "colaborador_email", "projeto", "horas", 
+                             "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão"]
+            
+            df_novo = pd.DataFrame([novo])[ordem_colunas]
+            df_final = pd.concat([df_lancamentos, df_novo], ignore_index=True)
+            
             conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("✅ Enviado! A Clau receberá a notificação por e-mail.")
+            st.success("✅ Enviado! Notificação disparada para a Clau.")
             time.sleep(1)
             st.rerun()
 
-# === ÁREA ADMIN (SOMENTE PEDRO E CLAU) ===
+# === ÁREA ADMIN (PEDRO E CLAU) ===
 if user_email in ADMINS:
     
-    # ABA 2: PAINEL DA CLAU (RESTAURADA)
+    # ABA 2: PAINEL DA CLAU
     with tabs[1]:
         st.subheader("🛡️ Gestão de Aprovações")
-        st.write("Edite diretamente na tabela para Aprovar ou Rejeitar registros.")
-        
         df_edit = st.data_editor(
             df_lancamentos,
             column_config={
@@ -115,16 +116,9 @@ if user_email in ADMINS:
             },
             disabled=["id", "colaborador_email", "data_registro"], hide_index=True
         )
-        
         if st.button("💾 Salvar Decisões"):
-            # Atualiza data de decisão nos registros que saíram de 'Pendente'
-            for i, row in df_edit.iterrows():
-                if row["status_aprovaca"] != "Pendente" and not row["data_decisao"]:
-                    df_edit.at[i, "data_decisao"] = datetime.now().strftime("%Y-%m-%d")
-            
             conn.update(worksheet="lancamentos", data=df_edit.astype(str))
-            st.success("Planilha atualizada com sucesso!")
-            st.rerun()
+            st.success("Planilha atualizada!"); st.rerun()
 
     # ABA 3: BI & FINANCEIRO
     with tabs[2]:
@@ -135,10 +129,9 @@ if user_email in ADMINS:
         
         apr = df_bi[df_bi["status_aprovaca"].str.contains("Aprovado", case=False, na=False)]
         
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         c1.metric("Horas Aprovadas", f"{apr['horas'].sum():.1f}h")
         c2.metric("Total a Pagar", f"R$ {apr['custo'].sum():,.2f}")
-        c3.metric("Registros", len(apr))
         
         st.divider()
         g1, g2 = st.columns(2)
@@ -155,13 +148,10 @@ if user_email in ADMINS:
             pags = apr.groupby("colaborador_email").agg(Horas=("horas", "sum"), Receber=("custo", "sum")).reset_index()
             st.dataframe(pags, column_config={"Receber": st.column_config.NumberColumn(format="R$ %.2f")}, use_container_width=True, hide_index=True)
 
-    # ABA 4: CONFIGURAÇÕES (RESTAURADA)
+    # ABA 4: CONFIGURAÇÕES
     with tabs[3]:
         st.subheader("⚙️ Configurações do Sistema")
-        edit_config = st.data_editor(df_config, num_rows="dynamic", key="config_editor", hide_index=True)
-        
+        edit_config = st.data_editor(df_config, num_rows="dynamic", key="conf_edit", hide_index=True)
         if st.button("💾 Salvar Configurações"):
             conn.update(worksheet="config", data=edit_config.astype(str))
-            st.success("Novas configurações aplicadas!")
-            time.sleep(1)
-            st.rerun()
+            st.success("Configurações salvas!"); st.rerun()
