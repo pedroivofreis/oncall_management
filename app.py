@@ -50,15 +50,16 @@ with abas[0]:
             }])
             
             try:
-                # Lógica robusta de salvamento
+                # Lê os dados atuais
                 df_atual = conn.read(worksheet="lancamentos", ttl=0).dropna(how="all")
+                # Junta com o novo e converte tudo para string para o Sheets aceitar
                 df_final = pd.concat([df_atual, novo], ignore_index=True).astype(str)
                 conn.update(worksheet="lancamentos", data=df_final)
                 st.success("Lançamento enviado com sucesso! ✅")
                 st.balloons()
             except Exception as e:
-                st.error(f"Erro ao salvar. Verifique se o e-mail {conn._service_account_info['client_email']} é EDITOR da planilha.")
-                st.write(f"Detalhe técnico: {e}")
+                st.error("Erro ao salvar na planilha. Verifique as permissões de EDITOR.")
+                st.exception(e) # Mostra o erro real sem travar o app
 
 if user_email in ADMINS:
     with abas[3]:
