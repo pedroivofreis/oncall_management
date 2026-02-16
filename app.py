@@ -6,46 +6,24 @@ import uuid
 
 st.set_page_config(page_title="Gestão OnCall", layout="wide", page_icon="💸")
 
-# --- 1. CONEXÃO LIMPA ---
+# --- 1. CONEXÃO SIMPLIFICADA ---
+# Removemos toda a "vacina" manual. O Streamlit vai ler direto dos Secrets (que já estão certos).
 try:
-    # Passo 1: Carrega as credenciais
-    if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-        creds = dict(st.secrets["connections"]["gsheets"])
-        
-        # [CORREÇÃO CRÍTICA] Remove parâmetros que não são credenciais de autenticação
-        # O GSheetsConnection usa 'spreadsheet' internamente, mas não aceita como argumento no **kwargs
-        if "spreadsheet" in creds:
-            del creds["spreadsheet"]
-        if "type" in creds:
-            del creds["type"] # Remove 'service_account' para evitar conflito
-            
-        # Corrige a quebra de linha da chave
-        if "private_key" in creds:
-            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
-    else:
-        creds = {}
-
-    # Passo 2: Conecta apenas com as credenciais de autenticação
-    if creds:
-        conn = st.connection("gsheets", type=GSheetsConnection, **creds)
-    else:
-        # Se não tiver credenciais manuais, confia no padrão do Streamlit
-        conn = st.connection("gsheets", type=GSheetsConnection)
-
+    conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error(f"Erro na Conexão: {e}")
+    st.error(f"Erro de Conexão: {e}")
     st.stop()
 
 # --- 2. CARREGAMENTO DE DADOS ---
 try:
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-except Exception as e:
-    # Se der erro de leitura, assume tabelas vazias
+except Exception:
+    # Se der erro (tabelas vazias ou não existem), cria DataFrames vazios
     df_config = pd.DataFrame(columns=["projetos", "emails_autorizados", "valor_hora"])
     df_lancamentos = pd.DataFrame(columns=["id", "data_registro", "colaborador_email", "projeto", "horas", "descricao", "status_aprovaca", "data_decisao"])
 
-# --- 3. VARIÁVEIS DO SISTEMA ---
+# --- 3. VARIÁVEIS GLOBAIS ---
 try:
     user_email = st.user.email
     if user_email is None: raise Exception()
@@ -54,7 +32,7 @@ except:
 
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
-# Listas e Valores
+# Listas
 lista_projetos = df_config["projetos"].dropna().unique().tolist()
 if not lista_projetos: lista_projetos = ["Sistema de horas", "Consultoria", "Suporte"]
 
@@ -64,7 +42,6 @@ except:
     valor_hora_padrao = 100.0
 
 # --- 4. VERIFICAÇÃO DE ACESSO ---
-# Se não for admin e não estiver na lista de autorizados, bloqueia
 if user_email not in ADMINS and user_email not in df_config["emails_autorizados"].values:
     st.error(f"🔒 Acesso negado para {user_email}.")
     st.stop()
@@ -72,7 +49,7 @@ if user_email not in ADMINS and user_email not in df_config["emails_autorizados"
 # --- 5. INTERFACE ---
 st.title("🚀 Gestão OnCall")
 
-# Define as abas baseado no perfil
+# Define abas
 if user_email in ADMINS:
     abas = st.tabs(["📝 Lançar", "🛡️ Aprovação", "📊 Dashboard", "⚙️ Config"])
 else:
@@ -103,7 +80,7 @@ with abas[0]:
             st.success("Sucesso! Registro enviado.")
             st.rerun()
 
-# === ABA 2, 3, 4 (SÓ ADMINS) ===
+# === ABA 2, 3, 4 (ADMINS) ===
 if user_email in ADMINS:
     
     # APROVAÇÃO
@@ -119,12 +96,11 @@ if user_email in ADMINS:
                 column_config={
                     "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Pendente", "Aprovado", "Rejeitado"], required=True)
                 },
-                disabled=["id", "projeto", "descricao"],
+                disabled=["id", "projeto", "descricao", "horas", "colaborador_email"],
                 hide_index=True
             )
             
             if st.button("Salvar Status"):
-                # Atualiza DF principal
                 for i, row in edited.iterrows():
                     if row["status_aprovaca"] != "Pendente":
                         idx = df_lancamentos[df_lancamentos["id"] == row["id"]].index
@@ -137,7 +113,8 @@ if user_email in ADMINS:
     
     # DASHBOARD
     with abas[2]:
-        st.subheader("Performance")
+        st.subheader("Performance Financeira")
+        # Tratamento de dados para evitar erro no gráfico
         df_dash = df_lancamentos.copy()
         df_dash["horas"] = pd.to_numeric(df_dash["horas"], errors="coerce").fillna(0)
         
@@ -146,11 +123,14 @@ if user_email in ADMINS:
         
         k1, k2 = st.columns(2)
         k1.metric("Horas Aprovadas", f"{total}h")
-        k2.metric("Faturamento", f"R$ {total * valor_hora_padrao:,.2f}")
+        k2.metric("Faturamento Estimado", f"R$ {total * valor_hora_padrao:,.2f}")
         
-        st.bar_chart(aprovados.groupby("projeto")["horas"].sum())
+        if not aprovados.empty:
+            st.bar_chart(aprovados.groupby("projeto")["horas"].sum())
+        else:
+            st.info("Aprove horas para ver os gráficos.")
 
-    # CONFIG
+    # CONFIGURAÇÃO
     with abas[3]:
         st.subheader("Configurações")
         conf_edit = st.data_editor(df_config, num_rows="dynamic")
