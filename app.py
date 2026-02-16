@@ -5,26 +5,45 @@ from datetime import datetime
 import uuid
 import time
 
-st.set_page_config(page_title="Oncall Management - v8.1", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v8.2", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. CARREGAMENTO ---
-df_config = conn.read(worksheet="config", ttl=0)
-df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
+try:
+    df_config = conn.read(worksheet="config", ttl=0)
+    df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
+    df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
+    
+    # Garantia da coluna email_enviado
+    if 'email_enviado' not in df_lancamentos.columns:
+        df_lancamentos['email_enviado'] = ""
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {e}")
+    st.stop()
 
-# --- 3. CONFIGURAÇÕES & SENHAS INDIVIDUAIS ---
-lista_projetos = df_config["projetos"].dropna().unique().tolist()
-df_users = df_config[["emails_autorizados", "valor_hora", "senhas"]].dropna(subset=["emails_autorizados"])
-dict_users = {}
-for _, row in df_users.iterrows():
-    dict_users[row["emails_autorizados"].strip()] = {
-        "valor": pd.to_numeric(row["valor_hora"], errors='coerce') or 0,
-        "senha": str(row["senhas"]).strip()
-    }
-ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
+# --- 3. CONFIGURAÇÕES & SENHAS (TRATAMENTO DE ERRO) ---
+try:
+    # Projetos independentes
+    lista_projetos = df_config["projetos"].dropna().unique().tolist()
+    
+    # Validação da coluna 'senhas' para evitar o KeyError
+    if "senhas" not in df_config.columns:
+        st.error("⚠️ Coluna 'senhas' não encontrada na aba 'config'. Adicione-a para continuar.")
+        st.stop()
+        
+    df_users = df_config[["emails_autorizados", "valor_hora", "senhas"]].dropna(subset=["emails_autorizados"])
+    dict_users = {}
+    for _, row in df_users.iterrows():
+        dict_users[row["emails_autorizados"].strip()] = {
+            "valor": pd.to_numeric(row["valor_hora"], errors='coerce') or 0,
+            "senha": str(row["senhas"]).strip()
+        }
+    ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
+except Exception as e:
+    st.error(f"Erro na estrutura das configurações: {e}")
+    st.stop()
 
 # --- 4. LOGIN ---
 st.sidebar.title("🔐 Acesso OnCall")
@@ -67,7 +86,9 @@ with tabs[0]:
                     "status_aprovaca": "Pendente", "data_decisao": "", "competencia": data_f.strftime("%Y-%m"),
                     "tipo": tipo, "descricão": desc, "email_enviado": ""
                 }
-                df_final = pd.concat([df_lancamentos, pd.DataFrame([novo])], ignore_index=True)
+                ordem = ["id", "data_registro", "colaborador_email", "projeto", "horas", 
+                         "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão", "email_enviado"]
+                df_final = pd.concat([df_lancamentos, pd.DataFrame([novo])[ordem]], ignore_index=True)
                 conn.update(worksheet="lancamentos", data=df_final.astype(str))
                 st.success("✅ Lançado!"); time.sleep(1); st.rerun()
 
