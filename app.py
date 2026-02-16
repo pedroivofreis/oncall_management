@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 import time
 
-st.set_page_config(page_title="Oncall Management - v6", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v6.2", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 try:
@@ -35,15 +35,14 @@ if mask_vazia.any():
 df_lancamentos["status_aprovaca"] = df_lancamentos["status_aprovaca"].fillna("Pendente").replace("", "Pendente")
 df_lancamentos["tipo"] = df_lancamentos["tipo"].fillna("Geral").replace("nan", "Geral")
 
-# --- 3. LEITURA DE CONFIGURAÇÕES (COM TIPAGEM SEGURA) ---
+# --- 3. LEITURA DE CONFIGURAÇÕES ---
 try:
-    # 1. Projetos (Lista de Strings)
+    # Projetos
     raw_proj = df_config["projetos"].unique().tolist()
     lista_projetos = [str(x).strip() for x in raw_proj if x and str(x).lower() not in ["nan", "none", "", "0"]]
     if not lista_projetos: lista_projetos = ["Sistema de horas"]
 
-    # 2. Dicionário de Preços (Mapeamento Seguro)
-    # Garante que valor seja float ou 0.0
+    # Dicionário de Preços
     df_users = df_config[["emails_autorizados", "valor_hora"]].copy()
     df_users["valor_hora"] = pd.to_numeric(df_users["valor_hora"], errors="coerce").fillna(0.0)
     
@@ -74,7 +73,7 @@ if user_email not in ADMINS and user_email not in lista_emails:
     st.stop()
 
 # --- 5. INTERFACE ---
-st.title("Oncall Management - v6 (by Pedro Reis)")
+st.title("Oncall Management - v6.2 (by Pedro Reis)")
 
 tabs_list = ["📝 Lançar"]
 if user_email in ADMINS:
@@ -88,7 +87,10 @@ with abas[0]:
     with st.form("form_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         proj = c1.selectbox("Projeto", lista_projetos)
-        tipo_ativ = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Reunião", "Outros"])
+        
+        # [AJUSTE] Adicionado "Testes" na lista
+        tipo_ativ = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"])
+        
         data_user = c3.date_input("Data da Atividade", value=datetime.now())
         
         c4, c5 = st.columns([1, 2])
@@ -156,12 +158,14 @@ if user_email in ADMINS:
 
         st.divider()
         st.write("#### 📝 Edição Geral")
+        
+        # [AJUSTE] Adicionado "Testes" nas opções de edição da tabela
         edited_df = st.data_editor(
             df_lancamentos,
             column_config={
                 "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Pendente", "Aprovado", "Rejeitado"], required=True),
                 "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos),
-                "tipo": st.column_config.SelectboxColumn("Tipo", options=["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Reunião", "Outros"]),
+                "tipo": st.column_config.SelectboxColumn("Tipo", options=["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"]),
                 "data_registro": st.column_config.TextColumn("Data", disabled=True)
             },
             disabled=["id", "colaborador_email"], hide_index=True, num_rows="dynamic"
@@ -212,10 +216,9 @@ if user_email in ADMINS:
             g["Valor/h (Atual)"] = g["colaborador_email"].map(dict_valores).fillna(0)
             st.dataframe(g, column_config={"Receber": st.column_config.NumberColumn(format="R$ %.2f"), "Valor/h (Atual)": st.column_config.NumberColumn(format="R$ %.2f")}, hide_index=True, use_container_width=True)
 
-    # ABA 4: CONFIGURAÇÕES (CORRIGIDA - SEM TRAVAMENTO)
+    # ABA 4: CONFIGURAÇÕES
     with abas[3]:
         st.subheader("⚙️ Configurações do Sistema")
-        st.info("💡 As listas são independentes. **Projetos** são livres. **Colaboradores** precisam de valor hora.")
         
         col_proj, col_users = st.columns([1, 2])
         
@@ -226,20 +229,14 @@ if user_email in ADMINS:
             
         with col_users:
             st.markdown("##### 👥 Colaboradores & Valores")
-            # PREPARAÇÃO DOS DADOS PARA O EDITOR (O SEGREDO DO SUCESSO)
-            # 1. Pega dados brutos
             raw_e = df_config["emails_autorizados"].tolist()
             raw_v = df_config["valor_hora"].tolist()
             
-            # 2. Normaliza Tamanhos
             max_len = max(len(raw_e), len(raw_v))
             raw_e += [""] * (max_len - len(raw_e))
-            raw_v += [0.0] * (max_len - len(raw_v)) # PAD COM ZERO (FLOAT), NÃO STRING!
+            raw_v += [0.0] * (max_len - len(raw_v))
             
-            # 3. Cria DataFrame Tipado
             df_u = pd.DataFrame({"emails_autorizados": raw_e, "valor_hora": raw_v})
-            
-            # 4. Força conversão para garantir que Streamlit receba números
             df_u["valor_hora"] = pd.to_numeric(df_u["valor_hora"], errors='coerce').fillna(0.0)
             
             edit_u = st.data_editor(
@@ -254,27 +251,22 @@ if user_email in ADMINS:
             )
 
         if st.button("💾 Salvar Configurações"):
-            # 1. Limpeza Projetos
             p_clean = [str(x).strip() for x in edit_p["projetos"].tolist() if str(x).strip() not in ["", "nan", "None"]]
             if not p_clean: p_clean = ["Sistema de horas"]
             
-            # 2. Limpeza Usuários (Pega par Email + Valor)
             e_clean = []
             v_clean = []
             for _, row in edit_u.iterrows():
                 e_val = str(row["emails_autorizados"]).strip()
-                v_val = row["valor_hora"] # Já é float
-                
+                v_val = row["valor_hora"]
                 if e_val and e_val not in ["", "nan", "None"]:
                     e_clean.append(e_val)
                     v_clean.append(v_val if v_val > 0 else 0.0)
             
-            # 3. Montagem do Quadrado Perfeito
             max_len = max(len(p_clean), len(e_clean), 1)
-            
-            p_final = p_clean + [""] * (max_len - len(p_clean)) # Pad String
-            e_final = e_clean + [""] * (max_len - len(e_clean)) # Pad String
-            v_final = v_clean + [""] * (max_len - len(v_clean)) # Pad String (Convertemos pra string na hora de salvar)
+            p_final = p_clean + [""] * (max_len - len(p_clean))
+            e_final = e_clean + [""] * (max_len - len(e_clean))
+            v_final = v_clean + [""] * (max_len - len(v_clean))
             
             df_save = pd.DataFrame({
                 "projetos": p_final,
@@ -283,7 +275,6 @@ if user_email in ADMINS:
             })
             
             conn.update(worksheet="config", data=df_save.astype(str))
-            
             st.cache_data.clear()
             st.cache_resource.clear()
             st.success("✅ Salvo com sucesso!")
