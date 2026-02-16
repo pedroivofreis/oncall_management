@@ -19,7 +19,6 @@ except Exception as e:
 try:
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-    # Normaliza nomes de colunas para evitar conflitos no BI
     df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
 except Exception as e:
     st.error("Erro ao carregar dados da planilha.")
@@ -27,11 +26,9 @@ except Exception as e:
 
 # --- 3. CONFIGURAÇÕES & USUÁRIOS ---
 try:
-    # Projetos dinâmicos da aba Config
     raw_p = df_config["projetos"].dropna().unique().tolist()
     lista_projetos = [str(x).strip() for x in raw_p if str(x).strip() not in ["", "nan", "None"]]
     
-    # Valores Hora por usuário
     df_u = df_config[["emails_autorizados", "valor_hora"]].copy()
     df_u["valor_hora"] = pd.to_numeric(df_u["valor_hora"], errors="coerce").fillna(0.0)
     dict_valores = dict(zip(df_u["emails_autorizados"].str.strip(), df_u["valor_hora"]))
@@ -40,7 +37,7 @@ try:
 except Exception:
     st.stop()
 
-# --- 4. LOGIN (Senha: Humana1002*) ---
+# --- 4. LOGIN ---
 st.sidebar.title("🔐 Acesso")
 user_email = st.sidebar.selectbox("Identifique-se:", options=["Selecione..."] + sorted(list(dict_valores.keys())))
 autenticado = False
@@ -54,16 +51,16 @@ if user_email != "Selecione...":
         autenticado = True
 
 if not autenticado:
-    st.info("👈 Identifique-se na lateral para acessar o sistema.")
+    st.info("👈 Identifique-se na lateral.")
     st.stop()
 
-# --- 5. INTERFACE (TODAS AS SUAS ABAS DE VOLTA) ---
+# --- 5. INTERFACE ---
 if user_email in ADMINS:
     tabs = st.tabs(["📝 Lançar", "🛡️ Painel da Clau", "📊 BI & Financeiro", "⚙️ Configurações"])
 else:
     tabs = st.tabs(["📝 Lançar"])
 
-# === ABA 1: LANÇAR (COM A MUDANÇA DA ORDEM DAS COLUNAS) ===
+# === ABA 1: LANÇAR ===
 with tabs[0]:
     with st.form("novo_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
@@ -76,46 +73,37 @@ with tabs[0]:
         desc = c5.text_area("Descrição")
         
         if st.form_submit_button("Enviar para Aprovação"):
-            # A MUDANÇA ESTÁ AQUI: Dicionário organizado para bater com as colunas da Planilha
             novo = {
-                "id": str(uuid.uuid4()),                # Coluna A
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # Coluna B
-                "colaborador_email": user_email,        # Coluna C
-                "projeto": proj,                        # Coluna D
-                "horas": str(hrs),                      # Coluna E
-                "status_aprovaca": "Pendente",          # Coluna F (Ativa o E-mail)
-                "data_decisao": "",                     # Coluna G
-                "competencia": data_f.strftime("%Y-%m"),# Coluna H
-                "tipo": tipo,                           # Coluna I
-                "descricão": desc                       # Coluna J
+                "id": str(uuid.uuid4()),                # A
+                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # B
+                "colaborador_email": user_email,        # C
+                "projeto": proj,                        # D
+                "horas": str(hrs),                      # E
+                "status_aprovaca": "Pendente",          # F
+                "data_decisao": "",                     # G
+                "competencia": data_f.strftime("%Y-%m"),# H
+                "tipo": tipo,                           # I
+                "descricão": desc,                      # J
+                "email_enviado": ""                     # K (Sempre vazio para o script detectar)
             }
             
-            # BLINDAGEM: Garante que o Pandas não mude a ordem ao converter para DataFrame
+            # Ordem rigorosa das colunas (A até K)
             ordem_colunas = ["id", "data_registro", "colaborador_email", "projeto", "horas", 
-                             "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão"]
+                             "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão", "email_enviado"]
             
             df_novo = pd.DataFrame([novo])[ordem_colunas]
             df_final = pd.concat([df_lancamentos, df_novo], ignore_index=True)
             
             conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("✅ Enviado! Notificação disparada para a Clau.")
-            time.sleep(1)
-            st.rerun()
+            st.success("✅ Enviado! A notificação será processada em instantes.")
+            time.sleep(1); st.rerun()
 
-# === ÁREA ADMIN (PEDRO E CLAU) ===
+# === ÁREA ADMIN ===
 if user_email in ADMINS:
-    
     # ABA 2: PAINEL DA CLAU
     with tabs[1]:
         st.subheader("🛡️ Gestão de Aprovações")
-        df_edit = st.data_editor(
-            df_lancamentos,
-            column_config={
-                "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Pendente", "Aprovado", "Rejeitado"]),
-                "tipo": st.column_config.SelectboxColumn("Tipo", options=["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"]),
-            },
-            disabled=["id", "colaborador_email", "data_registro"], hide_index=True
-        )
+        df_edit = st.data_editor(df_lancamentos, hide_index=True)
         if st.button("💾 Salvar Decisões"):
             conn.update(worksheet="lancamentos", data=df_edit.astype(str))
             st.success("Planilha atualizada!"); st.rerun()
