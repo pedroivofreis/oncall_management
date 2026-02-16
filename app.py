@@ -5,16 +5,16 @@ import uuid
 import time
 
 # --- CONFIGURAÇÃO INICIAL (DEVE SER A PRIMEIRA LINHA) ---
-st.set_page_config(page_title="OnCall Humana - Neon Edition", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="OnCall Humana - Pro Edition", layout="wide", page_icon="🛡️")
 
-# 1. CONEXÃO COM O BANCO (NEON)
+# 1. CONEXÃO COM O BANCO NEON
 try:
     conn = st.connection("postgresql", type="sql")
 except Exception as e:
-    st.error("Erro na conexão. Verifique o secrets.toml.")
+    st.error("Erro na conexão com o banco. Verifique o secrets.toml.")
     st.stop()
 
-# --- FUNÇÕES DE BUSCA ---
+# --- CONSULTAS SQL ---
 def get_all_data():
     return conn.query("SELECT * FROM lancamentos ORDER BY data_registro DESC", ttl=0)
 
@@ -24,9 +24,8 @@ def get_config_users():
 def get_config_projs():
     return conn.query("SELECT * FROM projetos", ttl=0)
 
-# --- LOGIN E SEGURANÇA ---
+# --- LOGIN ---
 df_u = get_config_users()
-# Mapeia email -> senha e valor vindo do Neon
 dict_users = {row.email: {"valor": float(row.valor_hora), "senha": str(row.senha)} for row in df_u.itertuples()}
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
@@ -39,55 +38,45 @@ if user_email == "...":
 
 senha_input = st.sidebar.text_input("Senha:", type="password")
 if senha_input != dict_users[user_email]["senha"]:
-    st.sidebar.warning("Senha incorreta.")
     st.stop()
 
-# --- CARREGAMENTO DE DADOS ---
+# --- CARREGAMENTO ---
 df_lan = get_all_data()
 lista_projetos = get_config_projs()['nome'].tolist()
 
-# --- INTERFACE EM ABAS (A COMPLEXIDADE QUE VOCÊ PEDIU) ---
-tabs = st.tabs(["📝 Lançar", "📊 Meu Painel", "🛡️ Admin Geral", "📈 BI Financeiro", "⚙️ Setup"])
+# --- ABAS ---
+tabs = st.tabs(["📝 Lançar", "📊 Meu Painel", "🛡️ Admin", "📈 BI", "⚙️ Setup"])
 
-# === ABA 1: LANÇAR ===
-with tabs[0]:
-    st.subheader(f"Novo Registro - {user_email}")
+with tabs[0]: # LANÇAR
+    st.subheader(f"Novo Lançamento - {user_email}")
     with st.form("form_lancar", clear_on_submit=True):
         c1, c2 = st.columns(2)
         p = c1.selectbox("Projeto", lista_projetos if lista_projetos else ["Sustentação"])
-        t = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infra", "Testes", "Reunião"])
+        t = c2.selectbox("Tipo", ["Front-end", "Back-end", "Infra", "Reunião"])
         d = c1.date_input("Data", datetime.now())
         h = c2.number_input("Horas", min_value=0.5, step=0.5)
         desc = st.text_area("Descrição")
         
-        if st.form_submit_button("🚀 ENVIAR PARA O NEON"):
+        if st.form_submit_button("🚀 GRAVAR NO NEON"):
             query = """
                 INSERT INTO lancamentos (id, colaborador_email, projeto, horas, competencia, tipo, descricao, valor_hora_historico)
                 VALUES (:id, :email, :proj, :hrs, :comp, :tipo, :desc, :v_h)
             """
             params = {
                 "id": str(uuid.uuid4()), "email": user_email, "proj": p, "hrs": h,
-                "comp": d.strftime("%Y-%m"), "tipo": t, "desc": desc, 
-                "v_h": dict_users[user_email]["valor"]
+                "comp": d.strftime("%Y-%m"), "tipo": t, "desc": desc, "v_h": dict_users[user_email]["valor"]
             }
             with conn.session as s:
                 s.execute(query, params)
                 s.commit()
-            st.success("✅ Gravado instantaneamente no SQL!")
+            st.success("✅ Gravado!")
             time.sleep(1); st.rerun()
 
-# === ABA 2: MEU PAINEL ===
-with tabs[1]:
-    meus = df_lan[df_lan["colaborador_email"] == user_email].copy()
-    if not meus.empty:
-        st.dataframe(meus, use_container_width=True, hide_index=True)
-    else:
-        st.info("Sem lançamentos.")
+with tabs[1]: # DASH PESSOAL
+    st.dataframe(df_lan[df_lan["colaborador_email"] == user_email], use_container_width=True, hide_index=True)
 
-# === ABA 3: ADMIN (GESTÃO) ===
-with tabs[2]:
+with tabs[2]: # ADMIN
     if user_email in ADMINS:
-        st.subheader("🛡️ Controle Administrativo")
         df_editado = st.data_editor(df_lan, use_container_width=True, hide_index=True)
         if st.button("💾 Sincronizar Alterações"):
             with conn.session as s:
@@ -97,33 +86,19 @@ with tabs[2]:
                         {"status": row.status_aprovaca, "proj": row.projeto, "hrs": row.horas, "id": row.id}
                     )
                 s.commit()
-            st.success("Banco sincronizado!")
-            time.sleep(1); st.rerun()
+            st.rerun()
 
-# === ABA 4: BI FINANCEIRO ===
-with tabs[3]:
-    if user_email in ADMINS:
-        st.subheader("📈 Inteligência de Dados")
-        if not df_lan.empty:
-            df_bi = df_lan.copy()
-            df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
-            df_bi["v_h"] = pd.to_numeric(df_bi["valor_hora_historico"], errors="coerce").fillna(0)
-            df_bi["custo"] = df_bi["horas"] * df_bi["v_h"]
-            
-            c1, c2 = st.columns(2)
-            with c1: st.write("Custo por Projeto"); st.bar_chart(df_bi.groupby("projeto")["custo"].sum())
-            with c2: st.write("Horas por Tipo"); st.bar_chart(df_bi.groupby("tipo")["horas"].sum())
-        else:
-            st.warning("Sem dados para análise.")
+with tabs[3]: # BI
+    if user_email in ADMINS and not df_lan.empty:
+        df_bi = df_lan.copy()
+        df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
+        st.bar_chart(df_bi.groupby("projeto")["horas"].sum())
 
-# === ABA 5: SETUP (CONFIGURAÇÕES) ===
-with tabs[4]:
+with tabs[4]: # SETUP
     if user_email in ADMINS:
-        st.subheader("⚙️ Configurações do Sistema")
-        col_u, col_p = st.columns(2)
-        with col_u:
-            st.write("**Usuários**")
-            new_u = st.data_editor(df_u, num_rows="dynamic", hide_index=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            new_u = st.data_editor(df_u, num_rows="dynamic", hide_index=True, key="u_edt")
             if st.button("Salvar Usuários"):
                 with conn.session as s:
                     s.execute("DELETE FROM usuarios")
@@ -132,10 +107,8 @@ with tabs[4]:
                                   {"e": r.email, "v": r.valor_hora, "s": r.senha})
                     s.commit()
                 st.rerun()
-        with col_p:
-            st.write("**Projetos**")
-            df_p_current = get_config_projs()
-            new_p = st.data_editor(df_p_current, num_rows="dynamic", hide_index=True)
+        with c2:
+            new_p = st.data_editor(get_config_projs(), num_rows="dynamic", hide_index=True, key="p_edt")
             if st.button("Salvar Projetos"):
                 with conn.session as s:
                     s.execute("DELETE FROM projetos")
