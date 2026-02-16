@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 import time
 
-st.set_page_config(page_title="Oncall Management - v6.9.2", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v7.0", layout="wide", page_icon="🚀")
 
 # --- CONEXÃO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -13,7 +13,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- CARREGAMENTO ---
 df_config = conn.read(worksheet="config", ttl=0)
 df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-# Normaliza para evitar erros de case-sensitive
 df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
 
 # --- CONFIGS ---
@@ -42,36 +41,39 @@ if not autenticado:
 abas_list = ["📝 Lançar", "🛡️ Painel da Clau", "📊 BI & Financeiro"]
 abas = st.tabs(abas_list) if user_email in ADMINS else st.tabs(["📝 Lançar"])
 
-# === ABA 1: LANÇAR ===
+# === ABA 1: LANÇAR (TIPOS RESTAURADOS) ===
 with abas[0]:
     with st.form("form_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         proj = c1.selectbox("Projeto", lista_projetos)
-        tipo = c2.selectbox("Tipo", ["Desenvolvimento", "Reunião", "Infra", "Outros"])
+        # Lista completa restaurada aqui:
+        tipo_ativ = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"])
         data_f = c3.date_input("Data", value=datetime.now())
-        hrs = st.number_input("Horas", min_value=0.5, step=0.5)
-        desc = st.text_area("Descrição")
+        
+        c4, c5 = st.columns([1, 2])
+        hrs = c4.number_input("Horas", min_value=0.5, step=0.5)
+        desc = c5.text_area("Descrição")
         
         if st.form_submit_button("Enviar Lançamento"):
-            # ORDEM DAS COLUNAS PARA O APPS SCRIPT: A(id), B(data), C(email), D(proj), E(horas), F(status)... J(desc)
+            # Ordem correta para a planilha image_9828c4
             novo = {
-                "id": str(uuid.uuid4()),
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "colaborador_email": user_email,
-                "projeto": proj,
-                "horas": str(hrs),
-                "status_aprovaca": "Pendente", # COLUNA F (6)
-                "data_decisao": "",
-                "competencia": data_f.strftime("%Y-%m"),
-                "tipo": tipo,
-                "descricão": desc # COLUNA J (10)
+                "id": str(uuid.uuid4()),                # A
+                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # B
+                "colaborador_email": user_email,        # C
+                "projeto": proj,                        # D
+                "horas": str(hrs),                      # E
+                "status_aprovaca": "Pendente",          # F (Dispara e-mail)
+                "data_decisao": "",                     # G
+                "competencia": data_f.strftime("%Y-%m"),# H
+                "tipo": tipo_ativ,                      # I
+                "descricão": desc                       # J
             }
             df_final = pd.concat([df_lancamentos, pd.DataFrame([novo])], ignore_index=True)
             conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("✅ Enviado! E-mail de notificação disparado.")
+            st.success("✅ Lançamento enviado e notificação disparada!")
             time.sleep(1); st.rerun()
 
-# === ABA BI (SOMENTE ADMIN) ===
+# === ABA 3: BI VISUAL RESTAURADO ===
 if user_email in ADMINS:
     with abas[2]:
         st.subheader("📊 Inteligência Financeira")
@@ -81,12 +83,21 @@ if user_email in ADMINS:
         
         apr = df_bi[df_bi["status_aprovaca"].str.contains("Aprovado", case=False, na=False)]
         
-        k1, k2 = st.columns(2)
-        k1.metric("Total Horas", f"{apr['horas'].sum():.1f}h")
-        k2.metric("Total Gasto", f"R$ {apr['custo'].sum():,.2f}")
+        m1, m2 = st.columns(2)
+        m1.metric("Total Horas Aprovadas", f"{apr['horas'].sum():.1f}h")
+        m2.metric("Total Investido", f"R$ {apr['custo'].sum():,.2f}")
         
         st.divider()
-        st.markdown("### 👥 Pagamentos Detalhados")
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown("### 🏗️ Custo por Projeto")
+            st.bar_chart(apr.groupby("projeto")["custo"].sum(), color="#2e7d32")
+        with g2:
+            st.markdown("### 🛠️ Horas por Tipo")
+            st.bar_chart(apr.groupby("tipo")["horas"].sum(), color="#29b5e8")
+            
+        st.divider()
+        st.markdown("### 👥 Tabela de Pagamentos")
         if not apr.empty:
             pags = apr.groupby("colaborador_email").agg(Horas=("horas", "sum"), Receber=("custo", "sum")).reset_index()
-            st.dataframe(pags, column_config={"Receber": st.column_config.NumberColumn(format="R$ %.2f")}, use_container_width=True)
+            st.dataframe(pags, column_config={"Receber": st.column_config.NumberColumn(format="R$ %.2f")}, use_container_width=True, hide_index=True)
