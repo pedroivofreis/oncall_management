@@ -6,7 +6,7 @@ import uuid
 import time
 
 # Configuração da Página
-st.set_page_config(page_title="Oncall Management - v7.2", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v7.4", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 try:
@@ -19,9 +19,16 @@ except Exception as e:
 try:
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
+    
+    # Limpeza básica: remove espaços dos nomes das colunas e coloca em minúsculo
     df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
+    
+    # GARANTIA: Se a coluna email_enviado não existir no arquivo, criamos ela no DataFrame
+    if 'email_enviado' not in df_lancamentos.columns:
+        df_lancamentos['email_enviado'] = ""
+        
 except Exception as e:
-    st.error("Erro ao carregar dados da planilha.")
+    st.error(f"Erro ao carregar dados: {e}")
     st.stop()
 
 # --- 3. CONFIGURAÇÕES & USUÁRIOS ---
@@ -74,20 +81,19 @@ with tabs[0]:
         
         if st.form_submit_button("Enviar para Aprovação"):
             novo = {
-                "id": str(uuid.uuid4()),                # A
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # B
-                "colaborador_email": user_email,        # C
-                "projeto": proj,                        # D
-                "horas": str(hrs),                      # E
-                "status_aprovaca": "Pendente",          # F
-                "data_decisao": "",                     # G
-                "competencia": data_f.strftime("%Y-%m"),# H
-                "tipo": tipo,                           # I
-                "descricão": desc,                      # J
-                "email_enviado": ""                     # K (Sempre vazio para o script detectar)
+                "id": str(uuid.uuid4()),
+                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "colaborador_email": user_email,
+                "projeto": proj,
+                "horas": str(hrs),
+                "status_aprovaca": "Pendente",
+                "data_decisao": "",
+                "competencia": data_f.strftime("%Y-%m"),
+                "tipo": tipo,
+                "descricão": desc,
+                "email_enviado": "" # Deixa vazio para o robô do Google detectar
             }
             
-            # Ordem rigorosa das colunas (A até K)
             ordem_colunas = ["id", "data_registro", "colaborador_email", "projeto", "horas", 
                              "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão", "email_enviado"]
             
@@ -95,7 +101,7 @@ with tabs[0]:
             df_final = pd.concat([df_lancamentos, df_novo], ignore_index=True)
             
             conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("✅ Enviado! A notificação será processada em instantes.")
+            st.success("✅ Enviado! A notificação será processada em até 1 minuto.")
             time.sleep(1); st.rerun()
 
 # === ÁREA ADMIN ===
@@ -115,7 +121,8 @@ if user_email in ADMINS:
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
         df_bi["custo"] = df_bi["horas"] * df_bi["colaborador_email"].str.strip().map(dict_valores).fillna(0)
         
-        apr = df_bi[df_bi["status_aprovaca"].str.contains("Aprovado", case=False, na=False)]
+        # Filtro robusto para o BI não sumir
+        apr = df_bi[df_bi["status_aprovaca"].str.strip().str.capitalize() == "Aprovado"]
         
         c1, c2 = st.columns(2)
         c1.metric("Horas Aprovadas", f"{apr['horas'].sum():.1f}h")
@@ -124,11 +131,13 @@ if user_email in ADMINS:
         st.divider()
         g1, g2 = st.columns(2)
         with g1:
-            st.markdown("### 🏗️ Custo por Projeto")
-            st.bar_chart(apr.groupby("projeto")["custo"].sum(), color="#2e7d32")
+            if not apr.empty:
+                st.markdown("### 🏗️ Custo por Projeto")
+                st.bar_chart(apr.groupby("projeto")["custo"].sum(), color="#2e7d32")
         with g2:
-            st.markdown("### 🛠️ Horas por Tipo")
-            st.bar_chart(apr.groupby("tipo")["horas"].sum(), color="#29b5e8")
+            if not apr.empty:
+                st.markdown("### 🛠️ Horas por Tipo")
+                st.bar_chart(apr.groupby("tipo")["horas"].sum(), color="#29b5e8")
             
         st.divider()
         st.markdown("### 👥 Tabela de Pagamentos")
