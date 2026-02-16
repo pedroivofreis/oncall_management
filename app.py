@@ -7,39 +7,37 @@ import time
 import io
 
 # Configuração da Página
-st.set_page_config(page_title="Oncall Management - v8.8", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v8.9", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. CARREGAMENTO ---
 try:
-    df_config = conn.read(worksheet="config", ttl=0)
+    # Carregando as abas separadas conforme solicitado
+    df_projetos_raw = conn.read(worksheet="config_projetos", ttl=0)
+    df_users_raw = conn.read(worksheet="config_usuarios", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
+    
+    # Normalização de colunas de lançamentos
     df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
     
-    # GARANTIA DE COLUNAS: Evita o erro KeyError das imagens 9924c8 e 999542
-    colunas_obrigatorias = ['email_enviado', 'valor_hora_historico']
-    for col in colunas_obrigatorias:
+    # GARANTIA DE COLUNAS CRÍTICAS (Evita KeyError)
+    for col in ['email_enviado', 'valor_hora_historico']:
         if col not in df_lancamentos.columns:
             df_lancamentos[col] = ""
             
 except Exception as e:
-    st.error(f"Erro ao carregar dados: {e}")
+    st.error(f"Erro ao carregar abas. Certifique-se de que existem: 'config_projetos', 'config_usuarios' e 'lancamentos'.")
     st.stop()
 
-# --- 3. CONFIGURAÇÕES INDEPENDENTES ---
-# Projetos lidos de forma totalmente isolada da coluna D
-lista_projetos = df_config["projetos"].dropna().astype(str).str.strip().unique().tolist()
+# --- 3. PROCESSAMENTO DE CONFIGURAÇÕES ---
+# Projetos lidos da nova aba independente
+lista_projetos = df_projetos_raw["projetos"].dropna().astype(str).str.strip().unique().tolist()
 
-# Usuários lidos das colunas A, B e C
-if "senhas" not in df_config.columns:
-    st.error("⚠️ Coluna 'senhas' não encontrada na aba 'config'.")
-    st.stop()
-
-df_u = df_config[["emails_autorizados", "valor_hora", "senhas"]].dropna(subset=["emails_autorizados"])
+# Usuários lidos da aba de permissões
 dict_users = {}
-for _, row in df_u.iterrows():
+for _, row in df_users_raw.dropna(subset=["emails_autorizados"]).iterrows():
     dict_users[row["emails_autorizados"].strip()] = {
         "valor": pd.to_numeric(row["valor_hora"], errors='coerce') or 0,
         "senha": str(row["senhas"]).strip()
@@ -54,7 +52,7 @@ autenticado = False
 
 if user_email != "Selecione...":
     senha_digitada = st.sidebar.text_input("Senha:", type="password")
-    if senha_digitada == dict_users[user_email]["senha"]:
+    if senha_digitada == dict_users.get(user_email, {}).get("senha"):
         autenticado = True
     elif senha_digitada:
         st.sidebar.error("Senha incorreta.")
@@ -100,10 +98,9 @@ with tabs[0]:
                     })
                 df_final = pd.concat([df_lancamentos, pd.DataFrame(novos)], ignore_index=True)
                 conn.update(worksheet="lancamentos", data=df_final.astype(str))
-                st.success("✅ Enviado!"); time.sleep(1); st.rerun()
+                st.success("✅ Lançamentos registrados!"); time.sleep(1); st.rerun()
 
     else:
-        # GERAÇÃO DE MODELO XLSX
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             pd.DataFrame(columns=["projeto","horas","tipo","descricão","data"]).to_excel(writer, index=False)
@@ -148,13 +145,10 @@ if user_email in ADMINS:
             mes = st.selectbox("Mês Referência:", sorted(df_lancamentos["competencia"].unique(), reverse=True))
             df_p = df_lancamentos[(df_lancamentos["competencia"] == mes) & (df_lancamentos["status_aprovaca"] == "Aprovado")].copy()
             df_p["horas"] = pd.to_numeric(df_p["horas"], errors="coerce").fillna(0)
-            
-            # PROTEÇÃO FINANCEIRA: Usa o valor histórico congelado ou o atual se for lançamento antigo
             df_p["v_h"] = pd.to_numeric(df_p["valor_hora_historico"], errors="coerce").fillna(
                 df_p["colaborador_email"].map(lambda x: dict_users.get(x, {}).get("valor", 0))
             )
             df_p["total"] = df_p["v_h"] * df_p["horas"]
-            
             st.dataframe(df_p.groupby("colaborador_email")["total"].sum().reset_index(), use_container_width=True)
             if st.button(f"Confirmar Pagamento de {mes}"):
                 df_lancamentos.loc[(df_lancamentos["competencia"] == mes) & (df_lancamentos["status_aprovaca"] == "Aprovado"), "status_aprovaca"] = "Pago"
@@ -168,13 +162,11 @@ if user_email in ADMINS:
             df_bi["colaborador_email"].map(lambda x: dict_users.get(x, {}).get("valor", 0))
         )
         df_bi["custo"] = df_bi["horas"] * df_bi["v_h"]
-        
         validos = df_bi[df_bi["status_aprovaca"].isin(["Aprovado", "Pago"])]
         
         m1, m2 = st.columns(2)
         m1.metric("Investimento Total", f"R$ {validos['custo'].sum():,.2f}")
         m2.metric("Horas Totais", f"{validos['horas'].sum():.1f}h")
-        
         st.divider()
         g1, g2 = st.columns(2)
         with g1:
@@ -184,12 +176,17 @@ if user_email in ADMINS:
             st.markdown("### 🛠️ Horas por Tipo")
             st.bar_chart(validos.groupby("tipo")["horas"].sum(), color="#29b5e8")
 
-    with tabs[4]: # CONFIGURAÇÕES
-        st.info("💡 Coluna 'Projetos' é independente. Gerencie Usuários (A, B, C) e Projetos (D) aqui.")
-        conf_ed = st.data_editor(df_config, num_rows="dynamic", hide_index=True, use_container_width=True)
-        if st.button("💾 Salvar Configurações"):
-            conn.update(worksheet="config", data=conf_ed.astype(str)); st.rerun()
+    with tabs[4]: # CONFIGURAÇÕES (AGORA SEPARADO POR SUB-TABS)
+        conf_t1, conf_t2 = st.tabs(["👥 Usuários & Horas", "🏗️ Projetos"])
+        with conf_t1:
+            ed_u = st.data_editor(df_users_raw, num_rows="dynamic", hide_index=True, use_container_width=True)
+            if st.button("💾 Salvar Usuários"):
+                conn.update(worksheet="config_usuarios", data=ed_u.astype(str)); st.rerun()
+        with conf_t2:
+            ed_p = st.data_editor(df_projetos_raw, num_rows="dynamic", hide_index=True, use_container_width=True)
+            if st.button("💾 Salvar Projetos"):
+                conn.update(worksheet="config_projetos", data=ed_p.astype(str)); st.rerun()
 
 # --- RODAPÉ ---
 st.markdown("---")
-st.markdown(f"<p style='text-align: center; color: grey;'>Projeto by <b>Pedro Reis</b> | OnCall Management v8.8</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align: center; color: grey;'>Projeto by <b>Pedro Reis</b> | OnCall Management v8.9</p>", unsafe_allow_html=True)
