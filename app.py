@@ -6,9 +6,9 @@ import uuid
 import time
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="OnCall v23 - Anti-Wipe", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="OnCall v24 - Cache Shield", layout="wide", page_icon="🛡️")
 
-# === DEFINIÇÃO IMUTÁVEL ===
+# === ESTRUTURA IMUTÁVEL ===
 ABA_PRINCIPAL = "banco_horas" 
 COLS_OFICIAIS = [
     "id", "data_registro", "colaborador_email", "projeto", "horas", 
@@ -18,91 +18,82 @@ COLS_OFICIAIS = [
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 1. FUNÇÃO DE LEITURA (COM GARANTIA DE CABEÇALHO) ---
+# --- 1. LEITURA COM FILTRO DE CACHE ---
 def carregar_dados_seguros():
+    # Forçamos o Streamlit a esquecer TUDO o que ele acha que sabe sobre a planilha
+    st.cache_data.clear() 
+    conn.clear()
+    
     try:
-        conn.clear()
         df = conn.read(worksheet=ABA_PRINCIPAL, ttl=0)
         
-        if df.empty or len(df.columns) < 2:
+        if df is None or df.empty or len(df.columns) < 2:
             return pd.DataFrame(columns=COLS_OFICIAIS)
         
-        # Normaliza nomes das colunas
         df.columns = [str(c).strip().lower() for c in df.columns]
         
-        # Se as colunas lidas estiverem erradas, ignora e força as oficiais
-        for col in COLS_OFICIAIS:
-            if col not in df.columns:
-                df[col] = ""
-        
+        # Se a leitura falhar em trazer as colunas, não aceitamos "vazio"
+        if "projeto" not in df.columns:
+            return pd.DataFrame(columns=COLS_OFICIAIS)
+            
         return df[COLS_OFICIAIS]
     except Exception:
         return pd.DataFrame(columns=COLS_OFICIAIS)
 
-# --- 2. FUNÇÃO DE SALVAMENTO (O MOTOR BLINDADO) ---
-def salvar_master(df_para_gravar):
-    """
-    Esta função garante que o cabeçalho NUNCA seja esquecido 
-    no momento do upload para o Google Sheets.
-    """
+# --- 2. SALVAMENTO COM DELAY DE CONFIRMAÇÃO ---
+def salvar_blindado(df_para_gravar):
     try:
-        if df_para_gravar is None:
-            return
+        if df_para_gravar is None or df_para_gravar.empty:
+            # Nunca permitimos salvar um DataFrame totalmente vazio que mataria o cabeçalho
+            df_para_gravar = pd.DataFrame(columns=COLS_OFICIAIS)
 
-        # PASSO A: Garantir que o DataFrame de envio tenha TODAS as colunas oficiais
+        # Re-garante as colunas no DF de saída
         for col in COLS_OFICIAIS:
             if col not in df_para_gravar.columns:
                 df_para_gravar[col] = ""
         
-        # PASSO B: Forçar a ordem exata (isso reconstrói o cabeçalho na linha 1)
-        df_final = df_para_gravar[COLS_OFICIAIS].copy()
-        
-        # PASSO C: Limpeza de dados (converte nulos em vazio e tudo para texto)
-        df_final = df_final.fillna("").astype(str)
-        
-        # PASSO D: O envio final
-        conn.clear()
-        conn.update(worksheet=ABA_PRINCIPAL, data=df_final)
-        
-        st.toast("✅ Dados sincronizados com sucesso!", icon="🎉")
-        time.sleep(1)
+        df_final = df_para_gravar[COLS_OFICIAIS].fillna("").astype(str)
+
+        # --- A MANOBRA DE SEGURANÇA ---
+        with st.spinner("📦 Sincronizando com Google Sheets (Aguarde 2s)..."):
+            conn.update(worksheet=ABA_PRINCIPAL, data=df_final)
+            # Damos 2 segundos para o Google Sheets "respirar" e consolidar os dados
+            time.sleep(2) 
+            conn.clear()
+            st.cache_data.clear()
+
+        st.toast("✅ Sincronizado!", icon="🚀")
+        time.sleep(0.5)
         st.rerun()
         
     except Exception as e:
-        st.error(f"❌ ERRO AO GRAVAR: {e}")
-        if "protected" in str(e).lower():
-            st.warning("⚠️ Remova a proteção da Linha 1 no Google Sheets!")
+        st.error(f"❌ Erro: {e}")
 
-# --- 3. LOGIN E CONFIGS ---
+# --- 3. LOGIN ---
 dict_users = {
     "pedroivofernandesreis@gmail.com": {"valor": 100, "senha": "123"},
     "claudiele.andrade@gmail.com": {"valor": 150, "senha": "456"}
 }
 lista_projs = ["Sustentação", "Projeto A", "Projeto B", "Consultoria", "Outros"]
-ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
-st.sidebar.title("🚀 OnCall Phoenix")
-user = st.sidebar.selectbox("Usuário", ["Selecione..."] + list(dict_users.keys()))
-
-if user == "Selecione...":
-    st.stop()
-
+st.sidebar.title("🛡️ OnCall v24")
+user = st.sidebar.selectbox("Usuário", ["..."] + list(dict_users.keys()))
+if user == "...": st.stop()
 senha = st.sidebar.text_input("Senha", type="password")
-if senha != dict_users[user]["senha"]:
-    st.stop()
+if senha != dict_users[user]["senha"]: st.stop()
 
-# --- 4. CARREGAMENTO DOS DADOS ---
+# --- 4. CARREGAMENTO ---
 df_lan = carregar_dados_seguros()
 
-# --- 5. INTERFACE (TABS) ---
-t_lancar, t_dash, t_admin, t_bi = st.tabs(["📝 LANÇAR", "📊 MEU DASH", "🛡️ ADMIN", "📈 BI"])
+# --- 5. INTERFACE ---
+t1, t2, t3 = st.tabs(["📝 LANÇAR", "🛡️ ADMIN", "📊 DASH"])
 
-with t_lancar:
-    with st.form("form_novo"):
+with t1:
+    with st.form("f_novo"):
         st.markdown("### Registrar Horas")
         c1, c2 = st.columns(2)
         p = c1.selectbox("Projeto", lista_projs)
-        t = c2.selectbox("Tipo", ["Front-end", "Back-end", "Infra", "Reunião", "Outros"])
+        t = c2.selectbox("Tipo", ["Front-end", "Back-end", "Infra", "Reunião"])
         d = c1.date_input("Data", datetime.now())
         h = c2.number_input("Horas", min_value=0.5, step=0.5)
         desc = st.text_area("Descrição")
@@ -115,33 +106,21 @@ with t_lancar:
                 "tipo": t, "descricão": desc, "email_enviado": "", 
                 "valor_hora_historico": str(dict_users[user]["valor"])
             }
-            # Concatena e salva usando a função blindada
             df_atualizado = pd.concat([df_lan, pd.DataFrame([novo])], ignore_index=True)
-            salvar_master(df_atualizado)
+            salvar_blindado(df_atualizado)
 
-with t_dash:
-    meus = df_lan[df_lan["colaborador_email"] == user].copy()
-    st.dataframe(meus.sort_values("data_registro", ascending=False), use_container_width=True, hide_index=True)
-
-with t_admin:
-    if user in ADMINS:
-        st.markdown("### 🛡️ Painel do Administrador")
-        # O Editor de Dados agora está dentro de um formulário para evitar envios acidentais/incompletos
-        with st.form("form_admin"):
-            st.info("Altere os dados abaixo e clique em 'Salvar Alterações'.")
+with t2:
+    if user in ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]:
+        with st.form("f_adm"):
+            st.info("Edite os dados e clique em salvar. O sistema aguardará a confirmação do Google.")
             df_editado = st.data_editor(df_lan, num_rows="dynamic", use_container_width=True)
-            
-            if st.form_submit_button("💾 SALVAR ALTERAÇÕES NA PLANILHA"):
-                salvar_master(df_editado)
+            if st.form_submit_button("💾 SALVAR ALTERAÇÕES"):
+                salvar_blindado(df_editado)
 
-with t_bi:
-    if user in ADMINS:
-        df_bi = df_lan.copy()
-        df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
-        st.bar_chart(df_bi.groupby("projeto")["horas"].sum())
+with t3:
+    st.dataframe(df_lan[df_lan["colaborador_email"] == user], use_container_width=True)
 
-# --- BOTÃO DE EMERGÊNCIA NA SIDEBAR ---
+# --- BOTÃO DE EMERGÊNCIA ---
 st.sidebar.divider()
-if st.sidebar.button("🆘 REPARAR PLANILHA"):
-    df_reset = pd.DataFrame(columns=COLS_OFICIAIS)
-    salvar_master(df_reset)
+if st.sidebar.button("🆘 FORÇAR CABEÇALHO"):
+    salvar_blindado(pd.DataFrame(columns=COLS_OFICIAIS))
