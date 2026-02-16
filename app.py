@@ -15,16 +15,20 @@ try:
     # Limpa cache para garantir leitura real
     conn.clear()
     
-    # Tenta ler
-    df_lan = conn.read(worksheet="lancamentos", ttl=0)
-    df_u_raw = conn.read(worksheet="config_usuarios", ttl=0)
-    df_p_raw = conn.read(worksheet="config_projetos", ttl=0)
+    # Tenta ler as abas
+    try:
+        df_lan = conn.read(worksheet="lancamentos", ttl=0)
+        df_u_raw = conn.read(worksheet="config_usuarios", ttl=0)
+        df_p_raw = conn.read(worksheet="config_projetos", ttl=0)
+    except Exception as e:
+        st.error(f"⚠️ Erro de Leitura (Quota ou Conexão): {e}")
+        st.stop()
 
     # === VERIFICAÇÃO RIGOROSA ===
-    # Normaliza as colunas lidas para minúsculo
+    # Normaliza as colunas lidas para minúsculo para comparar
     cols_lidas = [str(c).strip().lower() for c in df_lan.columns]
     
-    # Colunas que PRECISAM existir
+    # Colunas que PRECISAM existir para o sistema funcionar
     cols_obrigatorias = ["projeto", "horas", "colaborador_email"]
     
     # Se faltar alguma, o app TRAVA AQUI.
@@ -38,7 +42,7 @@ try:
         1. Vá na planilha do Google.
         2. Verifique se a Linha 1 contém: `id, data_registro, colaborador_email, projeto, horas...`
         3. Se a planilha estiver vazia, preencha a Linha 1 manualmente.
-        4. Recarregue esta página (F5).
+        4. Espere 2 minutos (por causa do erro de cota) e recarregue esta página (F5).
         """)
         st.stop() # <--- AQUI É O FIM DA LINHA SE TIVER ERRO. ELE NÃO TENTA CONSERTAR.
 
@@ -48,7 +52,7 @@ try:
         if col not in df_lan.columns: df_lan[col] = ""
 
 except Exception as e:
-    st.error(f"Erro de Conexão: {e}")
+    st.error(f"Erro Crítico: {e}")
     st.stop()
 
 # --- 3. DADOS CARREGADOS ---
@@ -89,26 +93,34 @@ tabs = st.tabs(["📝 Lançar", "📊 Dash", "🛡️ Admin", "📈 BI", "⚙️
 
 # === LANÇAR ===
 with tabs[0]:
-    with st.form("f_lan"):
-        st.markdown("### Novo Lançamento")
-        df_ed = st.data_editor(pd.DataFrame(columns=["projeto","tipo","data","horas","descricão"]), num_rows="dynamic", use_container_width=True,
-            column_config={"projeto": st.column_config.SelectboxColumn(options=lista_projetos, required=True),
-                           "tipo": st.column_config.SelectboxColumn(options=["Front-end","Back-end","Banco de Dados","Infra","Testes","Reunião","Outros"]),
-                           "data": st.column_config.DateColumn(default=datetime.now()),
-                           "horas": st.column_config.NumberColumn(min_value=0.5, step=0.5)})
-        if st.form_submit_button("🚀 Salvar"):
-            if not df_ed.empty:
-                novos = []
-                v_h = dict_users[user_email]["valor"]
-                for _, r in df_ed.iterrows():
-                    if pd.isna(r["projeto"]): continue
-                    novos.append({
-                        "id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]),
-                        "status_aprovaca": "Pendente", "data_decisao": "", "competencia": r["data"].strftime("%Y-%m")[:7],
-                        "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)
-                    })
-                if novos: salvar("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
+    met = st.radio("Método:", ["Dinâmico", "Massa"], horizontal=True)
+    if met == "Dinâmico":
+        with st.form("f_lan"):
+            st.markdown("### Novo Lançamento")
+            df_ed = st.data_editor(pd.DataFrame(columns=["projeto","tipo","data","horas","descricão"]), num_rows="dynamic", use_container_width=True,
+                column_config={"projeto": st.column_config.SelectboxColumn(options=lista_projetos, required=True),
+                               "tipo": st.column_config.SelectboxColumn(options=["Front-end","Back-end","Banco de Dados","Infra","Testes","Reunião","Outros"]),
+                               "data": st.column_config.DateColumn(default=datetime.now()),
+                               "horas": st.column_config.NumberColumn(min_value=0.5, step=0.5)})
+            if st.form_submit_button("🚀 Salvar"):
+                if not df_ed.empty:
+                    novos = []
+                    v_h = dict_users[user_email]["valor"]
+                    for _, r in df_ed.iterrows():
+                        if pd.isna(r["projeto"]): continue
+                        novos.append({
+                            "id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]),
+                            "status_aprovaca": "Pendente", "data_decisao": "", "competencia": r["data"].strftime("%Y-%m")[:7],
+                            "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)
+                        })
+                    if novos: salvar("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
+    else:
+        arq = st.file_uploader("CSV/Excel")
+        if arq and st.button("Importar"):
+            df_m = pd.read_csv(arq) if arq.name.endswith('.csv') else pd.read_excel(arq)
+            novos = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(dict_users[user_email]["valor"])} for _, r in df_m.iterrows()]
+            salvar("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
 
 # === DASHBOARD ===
 with tabs[1]:
