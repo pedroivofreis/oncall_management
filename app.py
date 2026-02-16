@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 import time
 
-st.set_page_config(page_title="Oncall Management - v6.5", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v6.6", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 try:
@@ -62,10 +62,19 @@ except Exception as e:
     st.error(f"Erro ao ler configs: {e}")
     st.stop()
 
-# --- 4. SISTEMA DE LOGIN COM NOVA SENHA ADMIN ---
+# --- 4. SISTEMA DE LOGIN (CORREÇÃO ATTRIBUTEERROR) ---
 st.sidebar.title("🔐 Acesso")
 
-email_detectado = st.user.email
+# Tenta capturar o email de forma segura para evitar o AttributeError
+email_detectado = None
+try:
+    if hasattr(st, "context") and hasattr(st.context, "user"):
+        email_detectado = st.context.user.email
+    elif hasattr(st, "user"):
+        email_detectado = st.user.get("email")
+except:
+    email_detectado = None
+
 user_email = None
 acesso_liberado = False
 
@@ -74,11 +83,11 @@ if email_detectado:
     user_email = email_detectado
     acesso_liberado = True
 else:
+    # Se falhar o auto-login, cai na seleção manual que já funciona
     user_email = st.sidebar.selectbox("Identifique-se:", options=["Selecione..."] + sorted(lista_emails_validos))
     
     if user_email != "Selecione...":
         if user_email in ADMINS:
-            # === NOVA SENHA DEFINIDA AQUI ===
             senha = st.sidebar.text_input("Senha de Admin", type="password")
             if senha == "Humana1002*": 
                 st.sidebar.success("Acesso Admin Liberado ✅")
@@ -94,7 +103,7 @@ if not acesso_liberado:
     st.stop()
 
 # --- 5. INTERFACE ---
-st.title("Oncall Management - v6.5 (by Pedro Reis)")
+st.title("Oncall Management - v6.6 (by Pedro Reis)")
 
 tabs_list = ["📝 Lançar"]
 if user_email in ADMINS:
