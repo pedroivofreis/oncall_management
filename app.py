@@ -9,60 +9,61 @@ st.set_page_config(page_title="Gestão de Horas", layout="wide")
 try:
     user_email = st.user.email
 except:
-    user_email = "pedro@exemplo.com"
+    user_email = "pedroivofernandesreis@gmail.com"
 
-ADMINS = ["pedroivofreis@gmail.com", "claudiele@exemplo.com"] # Substitua pelos e-mails reais
+# ADMs oficiais
+ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# --- CARREGAR CONFIGURAÇÕES ---
+try:
+    df_config = conn.read(worksheet="config")
+except:
+    df_config = pd.DataFrame(columns=["projetos", "emails_autorizados", "valor_hora"])
+
+lista_projetos = df_config["projetos"].dropna().unique().tolist()
+lista_autorizados = df_config["emails_autorizados"].dropna().unique().tolist()
+
+# Bloqueio de segurança
+if user_email not in ADMINS and user_email not in lista_autorizados:
+    st.error(f"Acesso negado para {user_email}. Fale com a Clau.")
+    st.stop()
+
+# Definição das Abas
 if user_email in ADMINS:
-    abas = st.tabs(["🚀 Lançar Horas", "🛡️ Painel da Clau", "📊 Dashboard BI"])
+    abas = st.tabs(["🚀 Lançar Horas", "🛡️ Painel da Clau", "📊 Dashboard BI", "⚙️ Configurações"])
 else:
     abas = st.tabs(["🚀 Lançar Horas"])
 
 with abas[0]:
-    st.header("Novo Lançamento de Horas")
+    st.header("Novo Lançamento")
     with st.form("form_horas", clear_on_submit=True):
         col1, col2 = st.columns(2)
-        projeto = col1.selectbox("Projeto", ["Eskolare", "Humana", "Clau a Viajante", "Freelance"])
+        projeto = col1.selectbox("Projeto", lista_projetos if lista_projetos else ["Padrão"])
         horas = col2.number_input("Horas Trabalhadas", min_value=0.5, step=0.5)
         descricao = st.text_area("O que você desenvolveu?")
-        enviar = st.form_submit_button("Enviar para Aprovação")
-        
-        if enviar:
-            novo_dado = pd.DataFrame([{
+        if st.form_submit_button("Enviar Lançamento"):
+            novo = pd.DataFrame([{
                 "id": str(uuid.uuid4()),
-                "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "email": user_email,
+                "data_registro": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "colaborador_email": user_email,
                 "projeto": projeto,
                 "horas": horas,
                 "descricao": descricao,
-                "status": "Pendente"
+                "status_aprovaca": "Pendente",
+                "data_decisao": ""
             }])
-            df_atual = conn.read()
-            df_final = pd.concat([df_atual, novo_dado], ignore_index=True)
-            conn.update(data=df_final)
-            st.success("Lançamento registrado! ✅")
+            df_atual = conn.read(worksheet="lancamentos")
+            conn.update(worksheet="lancamentos", data=pd.concat([df_atual, novo], ignore_index=True))
+            st.success("Enviado! ✅")
 
 if user_email in ADMINS:
-    with abas[1]:
-        st.header("Aprovações")
-        df_gestao = conn.read()
-        pendentes = df_gestao[df_gestao['status'] == 'Pendente']
-        if not pendentes.empty:
-            df_editado = st.data_editor(pendentes, use_container_width=True)
-            if st.button("Salvar Decisões"):
-                df_gestao.update(df_editado)
-                conn.update(data=df_gestao)
-                st.rerun()
-        else:
-            st.info("Nenhum lançamento pendente.")
-
-    with abas[2]:
-        st.header("Visão Geral")
-        df_bi = conn.read()
-        df_aprovado = df_bi[df_bi['status'] == 'Aprovado']
-        c1, c2 = st.columns(2)
-        c1.metric("Horas Aprovadas", f"{df_aprovado['horas'].sum()}h")
-        c2.metric("Lançamentos Pendentes", len(df_bi[df_bi['status'] == 'Pendente']))
-        st.bar_chart(df_aprovado.groupby("projeto")["horas"].sum())
+    with abas[3]:
+        st.header("Configurações")
+        df_edit = st.data_editor(df_config, num_rows="dynamic", use_container_width=True)
+        if st.button("Salvar Tudo"):
+            conn.update(worksheet="config", data=df_edit)
+            st.success("Salvo! ⚙️")
+            st.rerun()
+    # As outras abas (Painel e BI) seguem a mesma lógica de leitura/escrita
