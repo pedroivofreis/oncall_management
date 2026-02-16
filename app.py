@@ -6,14 +6,16 @@ import uuid
 import time
 
 # Configuração da Página
-st.set_page_config(page_title="Oncall Management - v10.3", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v11.0", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. CARREGAMENTO ---
 try:
-    # ttl=0 garante que ele sempre pegue o dado fresco do Google
+    # conn.clear() FORÇA o app a esquecer o cache antigo e ler o link novo dos secrets
+    conn.clear()
+    
     df_p_raw = conn.read(worksheet="config_projetos", ttl=0).dropna(how="all")
     df_u_raw = conn.read(worksheet="config_usuarios", ttl=0).dropna(how="all")
     df_lan = conn.read(worksheet="lancamentos", ttl=0).dropna(how="all")
@@ -25,7 +27,7 @@ try:
     for col in ['email_enviado', 'valor_hora_historico']:
         if col not in df_lan.columns: df_lan[col] = ""
 except Exception as e:
-    st.error(f"Erro de Conexão: {e}")
+    st.error(f"Erro de Conexão: {e}. VERIFIQUE SE O LINK NO SECRETS.TOML ESTÁ ATUALIZADO!")
     st.stop()
 
 # --- 3. CONFIGS ---
@@ -38,22 +40,17 @@ for _, row in df_u_raw.dropna(subset=["emails_autorizados"]).iterrows():
     }
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
-# --- 4. FUNÇÃO DE SALVAMENTO (O SEGREDO) ---
+# --- 4. FUNÇÃO DE SALVAMENTO BLINDADA ---
 def forcar_gravacao(aba, df_novo):
     try:
-        # 1. Limpa o Cache (Obrigatório para destrava)
-        conn.clear()
-        
-        # 2. Prepara os dados (Remove Nulos e Força Texto)
+        conn.clear() # Limpa cache antes de escrever
         df_limpo = df_novo.fillna("").astype(str)
-        
-        # 3. Envia
         conn.update(worksheet=aba, data=df_limpo)
-        st.success(f"✅ Sucesso! Dados enviados para '{aba}'.")
+        st.success(f"✅ Sucesso! Dados atualizados na aba '{aba}'.")
         time.sleep(1)
         st.rerun()
     except Exception as e:
-        st.error(f"❌ ERRO CRÍTICO AO SALVAR: {e}")
+        st.error(f"❌ ERRO AO ESCREVER: {e}")
 
 # --- 5. LOGIN ---
 st.sidebar.title("🔐 Acesso OnCall")
@@ -69,7 +66,7 @@ if not autenticado:
     st.stop()
 
 # --- 6. INTERFACE ---
-tabs = st.tabs(["📝 Lançar", "📊 Meu Dash", "🛡️ Gerencial", "📈 BI", "⚙️ Config"]) if user_email in ADMINS else st.tabs(["📝 Lançar", "📊 Meu Dash"])
+tabs = st.tabs(["📝 Lançar", "📊 Meu Dash", "🛡️ Gerencial (Tabelona)", "📈 BI", "⚙️ Config"]) if user_email in ADMINS else st.tabs(["📝 Lançar", "📊 Meu Dash"])
 
 # === ABA: LANÇAR HORAS ===
 with tabs[0]:
@@ -110,7 +107,7 @@ with tabs[0]:
             novos_m = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)} for _, r in df_m.iterrows()]
             forcar_gravacao("lancamentos", pd.concat([df_lan, pd.DataFrame(novos_m)], ignore_index=True))
 
-# === ABA: MEU DASHBOARD ===
+# === ABA: MEU DASHBOARD (A TABELONA DO USUÁRIO) ===
 with tabs[1]:
     meus = df_lan[df_lan["colaborador_email"] == user_email].copy()
     meus["horas"] = pd.to_numeric(meus["horas"], errors="coerce").fillna(0)
@@ -119,19 +116,32 @@ with tabs[1]:
     c2.metric("Pagas", f"{meus[meus['status_aprovaca'] == 'Pago']['horas'].sum():.1f}h")
     c3.metric("Pendentes", f"{meus[meus['status_aprovaca'] == 'Pendente']['horas'].sum():.1f}h")
     c4.metric("Rejeitadas", f"{meus[meus['status_aprovaca'] == 'Rejeitado']['horas'].sum():.1f}h")
+    
+    st.markdown("### 📋 Meus Registros")
     st.dataframe(meus.sort_values("data_registro", ascending=False), use_container_width=True, hide_index=True)
 
-# === ABA: GERENCIAL & BI ===
+# === ABA: GERENCIAL (A TABELONA GERAL) ===
 if user_email in ADMINS:
     with tabs[2]:
-        s1, s2 = st.tabs(["✓ Aprovações", "💰 Pagamentos"])
+        s1, s2 = st.tabs(["📋 Listagem Geral (Tabelona)", "💰 Pagamentos"])
         with s1:
+            st.markdown("### Controle de Aprovações")
             with st.form("form_admin"):
-                df_edit = st.data_editor(df_lan, hide_index=True, use_container_width=True)
-                if st.form_submit_button("💾 Salvar Gerencial"):
+                # AQUI ESTÁ A TABELONA
+                df_edit = st.data_editor(df_lan, num_rows="dynamic", use_container_width=True)
+                if st.form_submit_button("💾 Salvar Alterações na Tabelona"):
                     forcar_gravacao("lancamentos", df_edit)
         with s2:
             mes = st.selectbox("Competência:", sorted(df_lan["competencia"].unique(), reverse=True))
+            df_pg = df_lan[(df_lan["competencia"] == mes) & (df_lan["status_aprovaca"] == "Aprovado")].copy()
+            df_pg["horas"] = pd.to_numeric(df_pg["horas"], errors="coerce").fillna(0)
+            df_pg["v_h"] = pd.to_numeric(df_pg["valor_hora_historico"], errors="coerce").fillna(
+                df_pg["colaborador_email"].map(lambda x: dict_users.get(x, {}).get("valor", 0))
+            )
+            df_pg["total"] = df_pg["v_h"] * df_pg["horas"]
+            
+            st.dataframe(df_pg.groupby("colaborador_email")["total"].sum().reset_index(), use_container_width=True)
+            
             if st.button(f"Pagar Tudo de {mes}"):
                 df_lan.loc[(df_lan["competencia"] == mes) & (df_lan["status_aprovaca"] == "Aprovado"), "status_aprovaca"] = "Pago"
                 forcar_gravacao("lancamentos", df_lan)
