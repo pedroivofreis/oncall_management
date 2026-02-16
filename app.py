@@ -14,12 +14,11 @@ except Exception as e:
     st.error(f"Erro de Conexão: {e}")
     st.stop()
 
-# --- 2. CARREGAMENTO COM LIMPEZA DE COLUNAS ---
+# --- 2. CARREGAMENTO ---
 try:
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-    
-    # Garante que as colunas lidas batam com o layout da planilha (image_974b88)
+    # Padroniza colunas para o BI não quebrar
     df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
 except Exception as e:
     st.error("Erro ao carregar dados.")
@@ -56,7 +55,7 @@ if not autenticado:
 abas_list = ["📝 Lançar", "🛡️ Painel da Clau", "📊 BI & Financeiro", "⚙️ Configurações"] if user_email in ADMINS else ["📝 Lançar"]
 abas = st.tabs(abas_list)
 
-# === ABA 1: LANÇAR (CORREÇÃO DE ENVIO) ===
+# === ABA 1: LANÇAR ===
 with abas[0]:
     with st.form("novo_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
@@ -69,8 +68,7 @@ with abas[0]:
         desc = c5.text_area("Descrição")
         
         if st.form_submit_button("Enviar para Aprovação"):
-            # Respeita estritamente a ordem da planilha para o Apps Script (image_974b88)
-            # A=id, B=data_registro, C=email, D=projeto, E=horas, F=desc, G=status
+            # Respeita a ordem exata da planilha (image_974b88)
             novo_dado = {
                 "id": str(uuid.uuid4()),
                 "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -78,7 +76,7 @@ with abas[0]:
                 "projeto": proj,
                 "horas": str(hrs),
                 "descricão": desc,
-                "status_aprovaca": "Pendente", # Este valor dispara o e-mail
+                "status_aprovaca": "Pendente",
                 "data_decisao": "",
                 "competencia": data_f.strftime("%Y-%m"),
                 "tipo": tipo
@@ -86,7 +84,7 @@ with abas[0]:
             
             df_final = pd.concat([df_lancamentos, pd.DataFrame([novo_dado])], ignore_index=True)
             conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("Enviado! Verifique o e-mail em instantes. 📧")
+            st.success("Enviado! A Clau receberá um e-mail. 📧")
             time.sleep(1)
             st.rerun()
 
@@ -98,7 +96,7 @@ if user_email in ADMINS:
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
         df_bi["custo"] = df_bi["horas"] * df_bi["colaborador_email"].str.strip().map(dict_valores).fillna(0)
         
-        apr = df_bi[df_bi["status_aprovaca"].str.contains("Aprovado", na=False)]
+        apr = df_bi[df_bi["status_aprovaca"].str.contains("Aprovado", case=False, na=False)]
         
         c1, c2 = st.columns(2)
         with c1:
