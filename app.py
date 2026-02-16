@@ -5,150 +5,135 @@ from datetime import datetime
 import uuid
 import time
 
-# Configuração da Página
-st.set_page_config(page_title="Oncall Management - v7.4", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v8.1", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error(f"Erro de Conexão: {e}")
-    st.stop()
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. CARREGAMENTO ---
-try:
-    df_config = conn.read(worksheet="config", ttl=0)
-    df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
-    
-    # Limpeza básica: remove espaços dos nomes das colunas e coloca em minúsculo
-    df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
-    
-    # GARANTIA: Se a coluna email_enviado não existir no arquivo, criamos ela no DataFrame
-    if 'email_enviado' not in df_lancamentos.columns:
-        df_lancamentos['email_enviado'] = ""
-        
-except Exception as e:
-    st.error(f"Erro ao carregar dados: {e}")
-    st.stop()
+df_config = conn.read(worksheet="config", ttl=0)
+df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
+df_lancamentos.columns = [c.strip().lower() for c in df_lancamentos.columns]
 
-# --- 3. CONFIGURAÇÕES & USUÁRIOS ---
-try:
-    raw_p = df_config["projetos"].dropna().unique().tolist()
-    lista_projetos = [str(x).strip() for x in raw_p if str(x).strip() not in ["", "nan", "None"]]
-    
-    df_u = df_config[["emails_autorizados", "valor_hora"]].copy()
-    df_u["valor_hora"] = pd.to_numeric(df_u["valor_hora"], errors="coerce").fillna(0.0)
-    dict_valores = dict(zip(df_u["emails_autorizados"].str.strip(), df_u["valor_hora"]))
-
-    ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
-except Exception:
-    st.stop()
+# --- 3. CONFIGURAÇÕES & SENHAS INDIVIDUAIS ---
+lista_projetos = df_config["projetos"].dropna().unique().tolist()
+df_users = df_config[["emails_autorizados", "valor_hora", "senhas"]].dropna(subset=["emails_autorizados"])
+dict_users = {}
+for _, row in df_users.iterrows():
+    dict_users[row["emails_autorizados"].strip()] = {
+        "valor": pd.to_numeric(row["valor_hora"], errors='coerce') or 0,
+        "senha": str(row["senhas"]).strip()
+    }
+ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 # --- 4. LOGIN ---
-st.sidebar.title("🔐 Acesso")
-user_email = st.sidebar.selectbox("Identifique-se:", options=["Selecione..."] + sorted(list(dict_valores.keys())))
+st.sidebar.title("🔐 Acesso OnCall")
+user_email = st.sidebar.selectbox("Usuário:", options=["Selecione..."] + sorted(list(dict_users.keys())))
 autenticado = False
 
 if user_email != "Selecione...":
-    if user_email in ADMINS:
-        senha = st.sidebar.text_input("Senha Admin", type="password")
-        if senha == "Humana1002*": autenticado = True
-        elif senha: st.sidebar.error("Senha incorreta!")
-    else:
+    senha_digitada = st.sidebar.text_input("Senha:", type="password")
+    if senha_digitada == dict_users[user_email]["senha"]:
         autenticado = True
+    elif senha_digitada:
+        st.sidebar.error("Senha incorreta.")
 
 if not autenticado:
-    st.info("👈 Identifique-se na lateral.")
+    st.info("👈 Identifique-se para acessar seu painel.")
     st.stop()
 
 # --- 5. INTERFACE ---
+tabs_list = ["📝 Lançar", "📊 Meu Dashboard"]
 if user_email in ADMINS:
-    tabs = st.tabs(["📝 Lançar", "🛡️ Painel da Clau", "📊 BI & Financeiro", "⚙️ Configurações"])
-else:
-    tabs = st.tabs(["📝 Lançar"])
+    tabs_list += ["🛡️ Gerencial", "📈 BI Financeiro", "⚙️ Configurações"]
+tabs = st.tabs(tabs_list)
 
-# === ABA 1: LANÇAR ===
+# === ABA: LANÇAR (INCLUI UPLOAD EM MASSA) ===
 with tabs[0]:
-    with st.form("novo_lan", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        proj = c1.selectbox("Projeto", lista_projetos)
-        tipo = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Testes", "Reunião", "Outros"])
-        data_f = c3.date_input("Data da Atividade", value=datetime.now())
-        
-        c4, c5 = st.columns([1, 2])
-        hrs = c4.number_input("Horas", min_value=0.5, step=0.5)
-        desc = c5.text_area("Descrição")
-        
-        if st.form_submit_button("Enviar para Aprovação"):
-            novo = {
-                "id": str(uuid.uuid4()),
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "colaborador_email": user_email,
-                "projeto": proj,
-                "horas": str(hrs),
-                "status_aprovaca": "Pendente",
-                "data_decisao": "",
-                "competencia": data_f.strftime("%Y-%m"),
-                "tipo": tipo,
-                "descricão": desc,
-                "email_enviado": "" # Deixa vazio para o robô do Google detectar
-            }
-            
-            ordem_colunas = ["id", "data_registro", "colaborador_email", "projeto", "horas", 
-                             "status_aprovaca", "data_decisao", "competencia", "tipo", "descricão", "email_enviado"]
-            
-            df_novo = pd.DataFrame([novo])[ordem_colunas]
-            df_final = pd.concat([df_lancamentos, df_novo], ignore_index=True)
-            
-            conn.update(worksheet="lancamentos", data=df_final.astype(str))
-            st.success("✅ Enviado! A notificação será processada em até 1 minuto.")
-            time.sleep(1); st.rerun()
+    metodo = st.radio("Método de Lançamento:", ["Individual", "Em Massa (CSV/Excel)"], horizontal=True)
+    
+    if metodo == "Individual":
+        with st.form("form_lan", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            proj = c1.selectbox("Projeto", lista_projetos)
+            tipo = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infra", "Testes", "Reunião", "Outros"])
+            data_f = c3.date_input("Data da Atividade", value=datetime.now())
+            hrs = st.number_input("Horas", min_value=0.5, step=0.5)
+            desc = st.text_area("Descrição")
+            if st.form_submit_button("Enviar Lançamento"):
+                novo = {
+                    "id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "colaborador_email": user_email, "projeto": proj, "horas": str(hrs),
+                    "status_aprovaca": "Pendente", "data_decisao": "", "competencia": data_f.strftime("%Y-%m"),
+                    "tipo": tipo, "descricão": desc, "email_enviado": ""
+                }
+                df_final = pd.concat([df_lancamentos, pd.DataFrame([novo])], ignore_index=True)
+                conn.update(worksheet="lancamentos", data=df_final.astype(str))
+                st.success("✅ Lançado!"); time.sleep(1); st.rerun()
+
+    else:
+        st.info("O arquivo deve conter as colunas: projeto, horas, tipo, descricão, data (YYYY-MM-DD)")
+        arquivo = st.file_uploader("Subir arquivo", type=["csv", "xlsx"])
+        if arquivo:
+            try:
+                df_massa = pd.read_csv(arquivo) if arquivo.name.endswith('.csv') else pd.read_excel(arquivo)
+                if st.button("Confirmar Importação"):
+                    novos_registros = []
+                    for _, r in df_massa.iterrows():
+                        novos_registros.append({
+                            "id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]),
+                            "status_aprovaca": "Pendente", "data_decisao": "", 
+                            "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": ""
+                        })
+                    df_final = pd.concat([df_lancamentos, pd.DataFrame(novos_registros)], ignore_index=True)
+                    conn.update(worksheet="lancamentos", data=df_final.astype(str))
+                    st.success(f"✅ {len(novos_registros)} registros importados!"); time.sleep(1); st.rerun()
+            except Exception as e:
+                st.error(f"Erro no formato do arquivo: {e}")
+
+# === ABA: MEU DASHBOARD ===
+with tabs[1]:
+    meus_dados = df_lancamentos[df_lancamentos["colaborador_email"] == user_email].copy()
+    meus_dados["horas"] = pd.to_numeric(meus_dados["horas"], errors="coerce").fillna(0)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Aprovadas", f"{meus_dados[meus_dados['status_aprovaca'] == 'Aprovado']['horas'].sum()}h")
+    c2.metric("Negadas", f"{meus_dados[meus_dados['status_aprovaca'] == 'Rejeitado']['horas'].sum()}h")
+    c3.metric("Pagas", f"{meus_dados[meus_dados['status_aprovaca'] == 'Pago']['horas'].sum()}h")
+    c4.metric("Pendentes", f"{meus_dados[meus_dados['status_aprovaca'] == 'Pendente']['horas'].sum()}h")
+    st.dataframe(meus_dados, use_container_width=True, hide_index=True)
 
 # === ÁREA ADMIN ===
 if user_email in ADMINS:
-    # ABA 2: PAINEL DA CLAU
-    with tabs[1]:
-        st.subheader("🛡️ Gestão de Aprovações")
-        df_edit = st.data_editor(df_lancamentos, hide_index=True)
-        if st.button("💾 Salvar Decisões"):
-            conn.update(worksheet="lancamentos", data=df_edit.astype(str))
-            st.success("Planilha atualizada!"); st.rerun()
+    with tabs[2]: # GERENCIAL
+        sub1, sub2 = st.tabs(["✓ Aprovações", "💰 Pagamentos"])
+        with sub1:
+            df_edit = st.data_editor(df_lancamentos, hide_index=True)
+            if st.button("Salvar Edições"):
+                conn.update(worksheet="lancamentos", data=df_edit.astype(str))
+                st.success("Salvo!"); st.rerun()
+        with sub2:
+            comp = st.selectbox("Mês de Referência:", sorted(df_lancamentos["competencia"].unique(), reverse=True))
+            df_p = df_lancamentos[(df_lancamentos["competencia"] == comp) & (df_lancamentos["status_aprovaca"] == "Aprovado")].copy()
+            df_p["horas"] = pd.to_numeric(df_p["horas"], errors="coerce").fillna(0)
+            df_p["total"] = df_p["colaborador_email"].map(lambda x: dict_users.get(x, {}).get("valor", 0)) * df_p["horas"]
+            st.table(df_p.groupby("colaborador_email")["total"].sum().reset_index())
+            if st.button(f"Marcar {comp} como PAGO"):
+                df_lancamentos.loc[(df_lancamentos["competencia"] == comp) & (df_lancamentos["status_aprovaca"] == "Aprovado"), "status_aprovaca"] = "Pago"
+                conn.update(worksheet="lancamentos", data=df_lancamentos.astype(str))
+                st.success("Pagamentos registrados!"); st.rerun()
 
-    # ABA 3: BI & FINANCEIRO
-    with tabs[2]:
-        st.subheader("📊 BI & Inteligência Financeira")
-        df_bi = df_lancamentos.copy()
+    with tabs[3]: # BI
+        filt = st.multiselect("Competências:", sorted(df_lancamentos["competencia"].unique()), default=sorted(df_lancamentos["competencia"].unique()))
+        df_bi = df_lancamentos[df_lancamentos["competencia"].isin(filt)].copy()
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
-        df_bi["custo"] = df_bi["horas"] * df_bi["colaborador_email"].str.strip().map(dict_valores).fillna(0)
-        
-        # Filtro robusto para o BI não sumir
-        apr = df_bi[df_bi["status_aprovaca"].str.strip().str.capitalize() == "Aprovado"]
-        
-        c1, c2 = st.columns(2)
-        c1.metric("Horas Aprovadas", f"{apr['horas'].sum():.1f}h")
-        c2.metric("Total a Pagar", f"R$ {apr['custo'].sum():,.2f}")
-        
-        st.divider()
-        g1, g2 = st.columns(2)
-        with g1:
-            if not apr.empty:
-                st.markdown("### 🏗️ Custo por Projeto")
-                st.bar_chart(apr.groupby("projeto")["custo"].sum(), color="#2e7d32")
-        with g2:
-            if not apr.empty:
-                st.markdown("### 🛠️ Horas por Tipo")
-                st.bar_chart(apr.groupby("tipo")["horas"].sum(), color="#29b5e8")
-            
-        st.divider()
-        st.markdown("### 👥 Tabela de Pagamentos")
-        if not apr.empty:
-            pags = apr.groupby("colaborador_email").agg(Horas=("horas", "sum"), Receber=("custo", "sum")).reset_index()
-            st.dataframe(pags, column_config={"Receber": st.column_config.NumberColumn(format="R$ %.2f")}, use_container_width=True, hide_index=True)
+        df_bi["custo"] = df_bi["horas"] * df_bi["colaborador_email"].map(lambda x: dict_users.get(x, {}).get("valor", 0))
+        validos = df_bi[df_bi["status_aprovaca"].isin(["Aprovado", "Pago"])]
+        st.metric("Custo Total no Período", f"R$ {validos['custo'].sum():,.2f}")
+        st.bar_chart(validos.groupby("projeto")["custo"].sum())
 
-    # ABA 4: CONFIGURAÇÕES
-    with tabs[3]:
-        st.subheader("⚙️ Configurações do Sistema")
-        edit_config = st.data_editor(df_config, num_rows="dynamic", key="conf_edit", hide_index=True)
-        if st.button("💾 Salvar Configurações"):
-            conn.update(worksheet="config", data=edit_config.astype(str))
-            st.success("Configurações salvas!"); st.rerun()
+    with tabs[4]: # CONFIG
+        conf_edit = st.data_editor(df_config, num_rows="dynamic", hide_index=True)
+        if st.button("Salvar Configurações"):
+            conn.update(worksheet="config", data=conf_edit.astype(str))
+            st.success("Configurações atualizadas!"); st.rerun()
