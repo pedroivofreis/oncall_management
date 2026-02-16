@@ -21,7 +21,8 @@ try:
     df_lan = conn.read(worksheet="lancamentos", ttl=0)
 
     # === TRAVA DE SEGURANÇA (O SALVA-VIDAS) ===
-    # Se a leitura vier sem as colunas principais, o app TRAVA e avisa, para não salvar errado.
+    # Se a leitura vier sem as colunas principais, o app TRAVA e avisa.
+    # Isso IMPEDE que ele salve uma tabela vazia por cima dos seus dados.
     colunas_obrigatorias = ["projeto", "horas", "colaborador_email"]
     
     # Normaliza nomes para verificação (tudo minúsculo)
@@ -31,7 +32,8 @@ try:
     if not set(colunas_obrigatorias).issubset(cols_atuais):
         st.error("🚨 PARE TUDO! O sistema detectou que os cabeçalhos da planilha sumiram.")
         st.warning("Para evitar perda de dados, a gravação foi bloqueada. Vá no Google Sheets e restaure a Linha 1.")
-        st.stop() # Mata o app aqui. Ele não roda o resto, logo não salva nada errado.
+        st.info("Colunas esperadas: id, data_registro, colaborador_email, projeto, horas, status_aprovaca, data_decisao, competencia, tipo, descricão, email_enviado, valor_hora_historico")
+        st.stop() # Mata o app aqui.
 
     # Normaliza o DataFrame para uso
     df_lan.columns = [c.strip().lower() for c in df_lan.columns]
@@ -55,7 +57,7 @@ for _, row in df_u_raw.dropna(subset=["emails_autorizados"]).iterrows():
     }
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
-# --- 4. FUNÇÃO DE SALVAR (CORRIGIDA) ---
+# --- 4. FUNÇÃO DE SALVAR BLINDADA ---
 def salvar_blindado(aba, dataframe):
     try:
         # Verifica se o DF tem colunas antes de salvar
@@ -64,7 +66,7 @@ def salvar_blindado(aba, dataframe):
             return
 
         conn.clear()
-        # fillna("") é vital para não mandar células 'quebradas'
+        # fillna("") é vital para não mandar células 'quebradas' para o Google
         conn.update(worksheet=aba, data=dataframe.fillna("").astype(str))
         st.success(f"✅ Dados gravados com sucesso em '{aba}'!")
         time.sleep(1)
@@ -94,12 +96,14 @@ with tabs[0]:
     if met == "Dinâmico":
         with st.form("f_lan"):
             st.markdown("### Registrar Atividade")
+            # Cria DataFrame temporário para o editor
             df_ed = st.data_editor(pd.DataFrame(columns=["projeto","tipo","data","horas","descricão"]), num_rows="dynamic", use_container_width=True,
                 column_config={"projeto": st.column_config.SelectboxColumn(options=lista_projetos, required=True),
                                "tipo": st.column_config.SelectboxColumn(options=["Front-end","Back-end","Banco de Dados","Infra","Testes","Reunião","Outros"]),
                                "data": st.column_config.DateColumn(default=datetime.now()),
                                "horas": st.column_config.NumberColumn(min_value=0.5, step=0.5)})
-            if st.form_submit_button("🚀 Gravar"):
+            
+            if st.form_submit_button("🚀 Gravar Lançamentos"):
                 if not df_ed.empty:
                     novos = []
                     v_h = dict_users[user_email]["valor"]
@@ -121,7 +125,8 @@ with tabs[0]:
         arq = st.file_uploader("CSV/Excel")
         if arq and st.button("Importar"):
             df_m = pd.read_csv(arq) if arq.name.endswith('.csv') else pd.read_excel(arq)
-            novos = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(dict_users[user_email]["valor"])} for _, r in df_m.iterrows()]
+            v_h = dict_users[user_email]["valor"]
+            novos = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)} for _, r in df_m.iterrows()]
             salvar_blindado("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
 
 # === ABA: DASHBOARD ===
@@ -138,7 +143,7 @@ with tabs[1]:
 # === ABA: ADMIN & BI ===
 if user_email in ADMINS:
     with tabs[2]: # Admin
-        s1, s2 = st.tabs(["Geral", "Pagamentos"])
+        s1, s2 = st.tabs(["Geral (Tabelona)", "Pagamentos"])
         with s1:
             with st.form("f_adm"):
                 df_edt = st.data_editor(df_lan, num_rows="dynamic", use_container_width=True)
@@ -154,18 +159,27 @@ if user_email in ADMINS:
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
         df_bi["custo"] = df_bi["horas"] * pd.to_numeric(df_bi["valor_hora_historico"], errors="coerce").fillna(0)
         val = df_bi[df_bi["status_aprovaca"].isin(["Aprovado","Pago"])]
+        
         c1, c2 = st.columns(2)
-        c1.metric("R$ Total", f"R$ {val['custo'].sum():,.2f}")
-        c2.metric("Horas", f"{val['horas'].sum():.1f}h")
-        st.bar_chart(val.groupby("projeto")["custo"].sum())
+        c1.metric("R$ Investimento Total", f"R$ {val['custo'].sum():,.2f}")
+        c2.metric("Horas Totais", f"{val['horas'].sum():.1f}h")
+        
+        st.divider()
+        g1, g2 = st.columns(2)
+        with g1: 
+            st.markdown("### Por Projeto")
+            st.bar_chart(val.groupby("projeto")["custo"].sum())
+        with g2: 
+            st.markdown("### Por Tipo")
+            st.bar_chart(val.groupby("tipo")["horas"].sum())
 
     with tabs[4]: # Config
         c1, c2 = st.tabs(["Usuários", "Projetos"])
         with c1:
             with st.form("fu"):
                 du = st.data_editor(df_u_raw, num_rows="dynamic", use_container_width=True)
-                if st.form_submit_button("Salvar"): salvar_blindado("config_usuarios", du.dropna(subset=["emails_autorizados"]))
+                if st.form_submit_button("Salvar Usuários"): salvar_blindado("config_usuarios", du.dropna(subset=["emails_autorizados"]))
         with c2:
             with st.form("fp"):
                 dp = st.data_editor(df_p_raw, num_rows="dynamic", use_container_width=True)
-                if st.form_submit_button("Salvar"): salvar_blindado("config_projetos", dp.dropna(subset=["projetos"]))
+                if st.form_submit_button("Salvar Projetos"): salvar_blindado("config_projetos", dp.dropna(subset=["projetos"]))
