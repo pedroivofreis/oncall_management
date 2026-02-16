@@ -14,20 +14,19 @@ except Exception as e:
     st.error(f"Erro de Conexão: {e}")
     st.stop()
 
-# --- 2. CARREGAMENTO E MIGRAÇÃO ---
+# --- 2. CARREGAMENTO ---
 try:
-    # ttl=0 garante que sempre pega o dado fresco
+    # ttl=0 é CRUCIAL para não pegar cache velho
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
 except:
     df_config = pd.DataFrame(columns=["projetos", "emails_autorizados", "valor_hora"])
     df_lancamentos = pd.DataFrame(columns=["id", "data_registro", "competencia", "colaborador_email", "projeto", "tipo", "horas", "descricao", "status_aprovaca", "data_decisao"])
 
-# Migração de colunas novas (Retrocompatibilidade)
+# Migração / Tratamento de colunas
 if "competencia" not in df_lancamentos.columns: df_lancamentos["competencia"] = ""
 if "tipo" not in df_lancamentos.columns: df_lancamentos["tipo"] = "Geral"
 
-# Correção de dados antigos
 mask_vazia = df_lancamentos["competencia"].isna() | (df_lancamentos["competencia"] == "") | (df_lancamentos["competencia"] == "nan")
 if mask_vazia.any():
     datas_temp = pd.to_datetime(df_lancamentos.loc[mask_vazia, "data_registro"], errors='coerce')
@@ -37,19 +36,17 @@ if mask_vazia.any():
 df_lancamentos["status_aprovaca"] = df_lancamentos["status_aprovaca"].fillna("Pendente").replace("", "Pendente")
 df_lancamentos["tipo"] = df_lancamentos["tipo"].fillna("Geral").replace("nan", "Geral")
 
-# --- 3. VARIÁVEIS GLOBAIS (LEITURA INTELIGENTE) ---
-# Aqui a mágica acontece: Lemos as colunas como listas independentes
+# --- 3. VARIÁVEIS GLOBAIS (LEITURA ROBUSTA) ---
 try:
-    # Pega projetos validos
-    lista_projetos_raw = df_config["projetos"].unique().tolist()
-    lista_projetos = [str(x) for x in lista_projetos_raw if str(x).lower() not in ["nan", "none", "", "0"]]
+    # Limpeza profunda ao ler projetos
+    raw_projs = df_config["projetos"].unique().tolist()
+    lista_projetos = [str(x).strip() for x in raw_projs if str(x).lower() not in ["nan", "none", "", "0"]]
     if not lista_projetos: lista_projetos = ["Sistema de horas"]
 
-    # Pega emails validos
-    lista_emails_raw = df_config["emails_autorizados"].unique().tolist()
-    lista_emails = [str(x).strip() for x in lista_emails_raw if str(x).lower() not in ["nan", "none", "", "0"] and "@" in str(x)]
+    # Limpeza profunda ao ler emails
+    raw_emails = df_config["emails_autorizados"].unique().tolist()
+    lista_emails = [str(x).strip() for x in raw_emails if str(x).lower() not in ["nan", "none", "", "0"] and "@" in str(x)]
     
-    # Pega valor hora
     try:
         valor_hora_padrao = float(df_config["valor_hora"].dropna().iloc[0])
     except:
@@ -68,7 +65,7 @@ ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 # --- 4. ACESSO ---
 if user_email not in ADMINS and user_email not in lista_emails:
-    st.error(f"🔒 Acesso negado para {user_email}. Solicite acesso ao administrador.")
+    st.error(f"🔒 Acesso negado para {user_email}.")
     st.stop()
 
 # --- 5. INTERFACE ---
@@ -118,7 +115,6 @@ if user_email in ADMINS:
     # ABA 2: PAINEL DA CLAU
     with abas[1]:
         st.subheader("🛡️ Central de Controle")
-        
         with st.expander("📥 Importar Excel Retroativo"):
             arquivo = st.file_uploader("Arquivo .xlsx", type=["xlsx"])
             if arquivo and st.button("Processar Importação"):
@@ -183,78 +179,74 @@ if user_email in ADMINS:
         st.subheader("📊 Inteligência Financeira")
         df_bi = df_lancamentos.copy()
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
-        
         c_f, c_k = st.columns([1, 3])
         with c_f:
             ms = sorted([x for x in df_bi["competencia"].unique() if x], reverse=True)
+            if not ms: ms = [datetime.now().strftime("%Y-%m")]
             sel_m = st.selectbox("Competência", ["TODOS"] + ms)
-        
         view = df_bi if sel_m == "TODOS" else df_bi[df_bi["competencia"] == sel_m]
         apr = view[view["status_aprovaca"] == "Aprovado"]
         tot_h = apr["horas"].sum()
-        
         with c_k:
             k1, k2, k3 = st.columns(3)
             k1.metric("Horas", f"{tot_h:.1f}h")
             k2.metric("Total R$", f"R$ {tot_h * valor_hora_padrao:,.2f}")
             k3.metric("Registros", len(apr))
-        
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
             if not apr.empty:
-                st.markdown("### 👥 Colaboradores")
                 grp = apr.groupby("colaborador_email").agg(Horas=("horas", "sum")).reset_index()
                 grp["R$"] = grp["Horas"] * valor_hora_padrao
                 st.dataframe(grp, hide_index=True, use_container_width=True)
         with c2:
-            if not apr.empty:
-                st.markdown("### 🛠️ Por Tipo")
-                st.bar_chart(apr.groupby("tipo")["horas"].sum())
+            if not apr.empty: st.bar_chart(apr.groupby("tipo")["horas"].sum())
 
-    # ABA 4: CONFIGURAÇÕES (DESACOPLADA)
+    # ABA 4: CONFIGURAÇÕES (CORRIGIDA E BLINDADA)
     with abas[3]:
         st.subheader("⚙️ Configurações do Sistema")
-        st.info("Aqui as listas são independentes. Adicione quantos projetos ou emails quiser.")
         
         col_proj, col_email, col_val = st.columns(3)
         
         with col_proj:
             st.markdown("##### 📂 Projetos Ativos")
             df_p = pd.DataFrame({"projetos": lista_projetos})
-            edit_p = st.data_editor(df_p, num_rows="dynamic", key="edit_proj", hide_index=True)
+            edit_p = st.data_editor(df_p, num_rows="dynamic", key="edit_proj", hide_index=True, use_container_width=True)
             
         with col_email:
             st.markdown("##### 📧 Emails Autorizados")
             df_e = pd.DataFrame({"emails_autorizados": lista_emails})
-            edit_e = st.data_editor(df_e, num_rows="dynamic", key="edit_email", hide_index=True)
+            edit_e = st.data_editor(df_e, num_rows="dynamic", key="edit_email", hide_index=True, use_container_width=True)
             
         with col_val:
             st.markdown("##### 💰 Valor Hora (R$)")
             novo_valor = st.number_input("Valor Base", value=valor_hora_padrao, step=10.0)
 
         if st.button("💾 Salvar Configurações Gerais"):
-            # 1. Extrai as listas limpas (sem vazios)
-            novos_projetos = [p for p in edit_p["projetos"].tolist() if p and str(p) != "nan"]
-            novos_emails = [e for e in edit_e["emails_autorizados"].tolist() if e and str(e) != "nan"]
+            # 1. PEGA OS DADOS LIMPOS DOS EDITORES
+            # O truque aqui é converter pra lista e limpar vazios/nones na força bruta
+            novos_projetos = [str(p).strip() for p in edit_p["projetos"].tolist() if str(p).strip() not in ["", "nan", "None"]]
+            novos_emails = [str(e).strip() for e in edit_e["emails_autorizados"].tolist() if str(e).strip() not in ["", "nan", "None"]]
             
-            # 2. Descobre o tamanho máximo para criar o DataFrame quadrado
+            # 2. CALCULA O TAMANHO MÁXIMO (PARA CRIAR O QUADRADO)
             max_len = max(len(novos_projetos), len(novos_emails), 1)
             
-            # 3. Preenche com vazios para as listas ficarem do mesmo tamanho
+            # 3. PREENCHE AS LISTAS MENORES COM STRING VAZIA "" (IMPORTANTE!)
+            # O Google Sheets precisa que todas colunas tenham o mesmo tamanho
             novos_projetos += [""] * (max_len - len(novos_projetos))
             novos_emails += [""] * (max_len - len(novos_emails))
             valores_hora = [novo_valor] + [""] * (max_len - 1)
             
-            # 4. Cria o DataFrame final para o Google Sheets
+            # 4. CRIA O DATAFRAME FINAL PERFEITO
             df_salvar = pd.DataFrame({
                 "projetos": novos_projetos,
                 "emails_autorizados": novos_emails,
                 "valor_hora": valores_hora
             })
             
-            # 5. Salva convertendo tudo para string
+            # 5. SALVA FORÇANDO TUDO PARA STRING
             conn.update(worksheet="config", data=df_salvar.astype(str))
-            st.success("✅ Configurações salvas e listas atualizadas!")
+            st.cache_data.clear() # Limpa o cache pra ver a mudança na hora
+            st.success("✅ Configurações salvas no Google Sheets!")
             time.sleep(1.5)
             st.rerun()
