@@ -6,27 +6,33 @@ import uuid
 
 st.set_page_config(page_title="Gestão OnCall", layout="wide", page_icon="💸")
 
-# --- 1. CONEXÃO SEGURA E SEM CONFLITOS ---
+# --- 1. CONEXÃO LIMPA ---
 try:
-    # Carrega credenciais corrigindo as quebras de linha se necessário
+    # Passo 1: Carrega as credenciais
     if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
         creds = dict(st.secrets["connections"]["gsheets"])
-        creds["private_key"] = creds["private_key"].replace("\\n", "\n")
         
-        # [CORREÇÃO] Remove a chave 'type' para evitar conflito com o Streamlit
+        # [CORREÇÃO CRÍTICA] Remove parâmetros que não são credenciais de autenticação
+        # O GSheetsConnection usa 'spreadsheet' internamente, mas não aceita como argumento no **kwargs
+        if "spreadsheet" in creds:
+            del creds["spreadsheet"]
         if "type" in creds:
-            del creds["type"]
+            del creds["type"] # Remove 'service_account' para evitar conflito
+            
+        # Corrige a quebra de linha da chave
+        if "private_key" in creds:
+            creds["private_key"] = creds["private_key"].replace("\\n", "\n")
     else:
         creds = {}
 
-    # Conecta usando as credenciais limpas
+    # Passo 2: Conecta apenas com as credenciais de autenticação
     if creds:
         conn = st.connection("gsheets", type=GSheetsConnection, **creds)
     else:
+        # Se não tiver credenciais manuais, confia no padrão do Streamlit
         conn = st.connection("gsheets", type=GSheetsConnection)
 
 except Exception as e:
-    # [CORREÇÃO] Mostra o erro real para facilitar o conserto
     st.error(f"Erro na Conexão: {e}")
     st.stop()
 
