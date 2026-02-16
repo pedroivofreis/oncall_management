@@ -4,18 +4,30 @@ from datetime import datetime
 import uuid
 import time
 
-# --- CONFIGURAÇÃO DA PÁGINA (DEVE SER A PRIMEIRA LINHA) ---
+# --- 1. CONFIGURAÇÃO DA PÁGINA (DEVE SER A PRIMEIRA LINHA) ---
 st.set_page_config(page_title="OnCall Humana - Pro Edition", layout="wide", page_icon="🛡️")
 
-# 1. CONEXÃO COM O BANCO NEON
-# Certifique-se de que o requirements.txt tenha: streamlit, pandas, psycopg2-binary, sqlalchemy
-try:
-    conn = st.connection("postgresql", type="sql")
-except Exception as e:
-    st.error("Erro na conexão com o banco. Verifique se os Secrets no Streamlit Cloud estão salvos corretamente.")
-    st.stop()
+# --- 2. FUNÇÃO PARA CONECTAR E ACORDAR O NEON (RETRY LOGIC) ---
+def get_connection():
+    tentativas = 3
+    for i in range(tentativas):
+        try:
+            # Tenta estabelecer a conexão configurada no secrets.toml
+            c = st.connection("postgresql", type="sql")
+            # Faz uma mini-consulta para validar se o banco está pronto
+            c.query("SELECT 1", ttl=0)
+            return c
+        except Exception:
+            if i < tentativas - 1:
+                st.toast(f"Acordando o banco de dados Neon... Tentativa {i+1}", icon="⏳")
+                time.sleep(5) # Espera 5 segundos para o banco sair do estado 'Idle'
+            else:
+                st.error("O banco de dados demorou muito para responder. Verifique o status no Console do Neon ou atualize a página.")
+                st.stop()
 
-# --- FUNÇÕES DE BUSCA (QUERIES SQL) ---
+conn = get_connection()
+
+# --- 3. FUNÇÕES DE CONSULTA SQL ---
 def get_all_data():
     return conn.query("SELECT * FROM lancamentos ORDER BY data_registro DESC", ttl=0)
 
@@ -25,12 +37,14 @@ def get_config_users():
 def get_config_projs():
     return conn.query("SELECT * FROM projetos", ttl=0)
 
-# --- LOGIN E SEGURANÇA ---
+# --- 4. LOGIN E SEGURANÇA ---
 df_u = get_config_users()
+if df_u.empty:
+    st.warning("⚠️ O banco parece estar vazio. Verifique se as tabelas foram criadas no Neon.")
+    st.stop()
+
 # Mapeia email -> senha e valor vindo do banco Neon
 dict_users = {row.email: {"valor": float(row.valor_hora), "senha": str(row.senha)} for row in df_u.itertuples()}
-
-# Seus e-mails como Administradores
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 st.sidebar.title("🛡️ OnCall Humana")
@@ -45,12 +59,11 @@ if senha_input != dict_users[user_email]["senha"]:
     st.sidebar.warning("Aguardando senha correta...")
     st.stop()
 
-# --- CARREGAMENTO GLOBAL DE DADOS ---
+# --- 5. CARREGAMENTO DE DADOS E ABAS ---
 df_lan = get_all_data()
 lista_projetos = get_config_projs()['nome'].tolist()
 
-# --- INTERFACE EM ABAS (COMPLEXIDADE TOTAL) ---
-tabs = st.tabs(["📝 Lançar Horas", "📊 Meu Painel", "🛡️ Admin Geral", "📈 BI Financeiro", "⚙️ Setup"])
+tabs = st.tabs(["📝 Lançar", "📊 Meu Painel", "🛡️ Admin Geral", "📈 BI Financeiro", "⚙️ Setup"])
 
 # === ABA 1: LANÇAMENTOS ===
 with tabs[0]:
@@ -61,9 +74,9 @@ with tabs[0]:
         t = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infra", "Testes", "Reunião"])
         d = c1.date_input("Data da Atividade", datetime.now())
         h = c2.number_input("Horas", min_value=0.5, step=0.5)
-        desc = st.text_area("Descrição detalhada da atividade")
+        desc = st.text_area("Descrição detalhada")
         
-        if st.form_submit_button("🚀 GRAVAR NO BANCO NEON"):
+        if st.form_submit_button("🚀 GRAVAR NO NEON"):
             query = """
                 INSERT INTO lancamentos (id, colaborador_email, projeto, horas, competencia, tipo, descricao, valor_hora_historico)
                 VALUES (:id, :email, :proj, :hrs, :comp, :tipo, :desc, :v_h)
@@ -86,17 +99,14 @@ with tabs[1]:
     if not meus.empty:
         st.dataframe(meus, use_container_width=True, hide_index=True)
     else:
-        st.info("Você ainda não possui lançamentos cadastrados.")
+        st.info("Você ainda não possui lançamentos.")
 
 # === ABA 3: ADMIN (EDIÇÃO E APROVAÇÃO) ===
 with tabs[2]:
     if user_email in ADMINS:
         st.subheader("🛡️ Gestão Administrativa")
-        st.info("Edite os dados diretamente na tabela e clique em Sincronizar.")
-        # Editor de dados robusto
         df_editado = st.data_editor(df_lan, use_container_width=True, hide_index=True)
-        
-        if st.button("💾 Sincronizar Edições com o Banco"):
+        if st.button("💾 Sincronizar Edições"):
             with conn.session as s:
                 for row in df_editado.itertuples():
                     s.execute(
@@ -104,11 +114,10 @@ with tabs[2]:
                         {"status": row.status_aprovaca, "proj": row.projeto, "hrs": row.horas, "tipo": row.tipo, "desc": row.descricao, "id": row.id}
                     )
                 s.commit()
-            st.success("Dados sincronizados com sucesso!")
-            time.sleep(1)
-            st.rerun()
+            st.success("Dados atualizados!")
+            time.sleep(1); st.rerun()
 
-# === ABA 4: BI FINANCEIRO (GRÁFICOS) ===
+# === ABA 4: BI FINANCEIRO ===
 with tabs[3]:
     if user_email in ADMINS:
         st.subheader("📈 Inteligência de Custos")
@@ -120,43 +129,38 @@ with tabs[3]:
             
             c1, c2 = st.columns(2)
             with c1: 
-                st.write("**Investimento por Projeto (R$)**")
+                st.write("**Custo por Projeto (R$)**")
                 st.bar_chart(df_bi.groupby("projeto")["custo"].sum())
             with c2: 
-                st.write("**Distribuição de Horas por Tipo**")
+                st.write("**Horas por Tipo**")
                 st.bar_chart(df_bi.groupby("tipo")["horas"].sum())
         else:
-            st.warning("Aguardando dados para gerar o BI.")
+            st.warning("Sem dados para análise no momento.")
 
-# === ABA 5: SETUP (GESTÃO DE PROJETOS E USUÁRIOS) ===
+# === ABA 5: SETUP (PROJETOS E USUÁRIOS) ===
 with tabs[4]:
     if user_email in ADMINS:
-        st.subheader("⚙️ Configurações Globais")
+        st.subheader("⚙️ Configurações")
         col_u, col_p = st.columns(2)
-        
         with col_u:
-            st.write("👥 **Usuários & Senhas**")
-            # Gerencie novos médicos ou mude senhas por aqui
-            new_u = st.data_editor(df_u, num_rows="dynamic", hide_index=True, key="users_editor")
-            if st.button("Atualizar Lista de Usuários"):
+            st.write("**Usuários & Senhas**")
+            new_u = st.data_editor(df_u, num_rows="dynamic", hide_index=True, key="u_edit")
+            if st.button("Salvar Usuários"):
                 with conn.session as s:
                     s.execute("DELETE FROM usuarios")
                     for r in new_u.itertuples():
                         s.execute("INSERT INTO usuarios (email, valor_hora, senha) VALUES (:e, :v, :s)", 
                                   {"e": r.email, "v": r.valor_hora, "s": r.senha})
                     s.commit()
-                st.success("Usuários atualizados!")
-                time.sleep(1); st.rerun()
-                
+                st.rerun()
         with col_p:
-            st.write("📁 **Projetos Ativos**")
-            df_p_current = get_config_projs()
-            new_p = st.data_editor(df_p_current, num_rows="dynamic", hide_index=True, key="projs_editor")
-            if st.button("Atualizar Lista de Projetos"):
+            st.write("**Projetos**")
+            df_p_now = get_config_projs()
+            new_p = st.data_editor(df_p_now, num_rows="dynamic", hide_index=True, key="p_edit")
+            if st.button("Salvar Projetos"):
                 with conn.session as s:
                     s.execute("DELETE FROM projetos")
                     for r in new_p.itertuples():
                         s.execute("INSERT INTO projetos (nome) VALUES (:n)", {"n": r.nome})
                     s.commit()
-                st.success("Projetos atualizados!")
-                time.sleep(1); st.rerun()
+                st.rerun()
