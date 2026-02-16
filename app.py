@@ -6,48 +6,65 @@ import uuid
 import time
 
 # Configuração da Página
-st.set_page_config(page_title="Oncall Management - v11.2", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v12.0 Auto-Repair", layout="wide", page_icon="🚑")
 
 # --- 1. CONEXÃO ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 2. CARREGAMENTO COM BLINDAGEM ---
-try:
-    conn.clear() # Limpa o cache para ler o dado REAL do Google
-    
-    # Lê as abas
-    df_p_raw = conn.read(worksheet="config_projetos", ttl=0)
-    df_u_raw = conn.read(worksheet="config_usuarios", ttl=0)
-    df_lan = conn.read(worksheet="lancamentos", ttl=0)
+# --- 2. CARREGAMENTO COM AUTO-REPARO (A CURA) ---
+def carregar_dados_blindados():
+    try:
+        conn.clear() # Limpa cache
+        
+        # Tenta ler as abas
+        try:
+            df_lan = conn.read(worksheet="lancamentos", ttl=0)
+            df_u_raw = conn.read(worksheet="config_usuarios", ttl=0)
+            df_p_raw = conn.read(worksheet="config_projetos", ttl=0)
+        except:
+            st.error("Erro de conexão inicial. Verifique se as abas existem.")
+            st.stop()
 
-    # === TRAVA DE SEGURANÇA (O SALVA-VIDAS) ===
-    # Se a leitura vier sem as colunas principais, o app TRAVA e avisa.
-    # Isso IMPEDE que ele salve uma tabela vazia por cima dos seus dados.
-    colunas_obrigatorias = ["projeto", "horas", "colaborador_email"]
-    
-    # Normaliza nomes para verificação (tudo minúsculo)
-    cols_atuais = [c.strip().lower() for c in df_lan.columns]
-    
-    # Verifica se as colunas essenciais existem
-    if not set(colunas_obrigatorias).issubset(cols_atuais):
-        st.error("🚨 PARE TUDO! O sistema detectou que os cabeçalhos da planilha sumiram.")
-        st.warning("Para evitar perda de dados, a gravação foi bloqueada. Vá no Google Sheets e restaure a Linha 1.")
-        st.info("Colunas esperadas: id, data_registro, colaborador_email, projeto, horas, status_aprovaca, data_decisao, competencia, tipo, descricão, email_enviado, valor_hora_historico")
-        st.stop() # Mata o app aqui.
+        # === AUTO-REPARO DA ABA LANÇAMENTOS ===
+        # Colunas oficiais que DEVEM existir
+        cols_oficiais = [
+            "id", "data_registro", "colaborador_email", "projeto", "horas", 
+            "status_aprovaca", "data_decisao", "competencia", "tipo", 
+            "descricão", "email_enviado", "valor_hora_historico"
+        ]
+        
+        # Verifica se as colunas lidas batem com as oficiais
+        cols_atuais = [str(c).strip().lower() for c in df_lan.columns]
+        
+        # Se não encontrar 'projeto' ou 'horas' ou 'email', assume que o cabeçalho explodiu
+        if "projeto" not in cols_atuais or "horas" not in cols_atuais:
+            st.warning("⚠️ ALERTA: O sistema detectou que a Linha 1 (Cabeçalho) sumiu ou está incorreta.")
+            with st.spinner("🚑 Aplicando AUTO-REPARO: Restaurando cabeçalhos originais..."):
+                # Cria um DataFrame vazio APENAS com os cabeçalhos certos
+                df_reparo = pd.DataFrame(columns=cols_oficiais)
+                # Força a gravação imediata para consertar a planilha
+                conn.update(worksheet="lancamentos", data=df_reparo)
+                st.success("✅ Planilha Consertada! O sistema irá recarregar.")
+                time.sleep(2)
+                st.rerun() # Recarrega a página para ler certo dessa vez
+        
+        # Se chegou aqui, o cabeçalho está ok. Normaliza.
+        df_lan.columns = [c.strip().lower() for c in df_lan.columns]
+        
+        # Garante colunas técnicas
+        for col in ['email_enviado', 'valor_hora_historico']:
+            if col not in df_lan.columns: df_lan[col] = ""
 
-    # Normaliza o DataFrame para uso
-    df_lan.columns = [c.strip().lower() for c in df_lan.columns]
-    
-    # Garante colunas técnicas (sem apagar as outras)
-    for col in ['email_enviado', 'valor_hora_historico']:
-        if col not in df_lan.columns:
-            df_lan[col] = ""
+        return df_lan, df_u_raw, df_p_raw
 
-except Exception as e:
-    st.error(f"Erro Crítico de Leitura: {e}")
-    st.stop()
+    except Exception as e:
+        st.error(f"Erro Crítico: {e}")
+        st.stop()
 
-# --- 3. CONFIGS ---
+# Carrega os dados usando a função blindada
+df_lan, df_u_raw, df_p_raw = carregar_dados_blindados()
+
+# --- 3. PROCESSAMENTO ---
 lista_projetos = df_p_raw["projetos"].dropna().astype(str).str.strip().unique().tolist()
 dict_users = {}
 for _, row in df_u_raw.dropna(subset=["emails_autorizados"]).iterrows():
@@ -57,28 +74,23 @@ for _, row in df_u_raw.dropna(subset=["emails_autorizados"]).iterrows():
     }
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
-# --- 4. FUNÇÃO DE SALVAR BLINDADA ---
-def salvar_blindado(aba, dataframe):
+# --- 4. FUNÇÃO SALVAR ---
+def salvar(aba, df):
     try:
-        # Verifica se o DF tem colunas antes de salvar
-        if dataframe.columns.empty:
-            st.error("Erro: Tentativa de salvar tabela sem colunas. Operação cancelada.")
-            return
-
         conn.clear()
-        # fillna("") é vital para não mandar células 'quebradas' para o Google
-        conn.update(worksheet=aba, data=dataframe.fillna("").astype(str))
-        st.success(f"✅ Dados gravados com sucesso em '{aba}'!")
-        time.sleep(1)
-        st.rerun()
+        # O index=False não é suportado diretamente por todas as versões da lib, 
+        # mas garantimos que o DF está limpo.
+        conn.update(worksheet=aba, data=df.fillna("").astype(str))
+        st.success(f"✅ Salvo em '{aba}'!")
+        time.sleep(1); st.rerun()
     except Exception as e:
-        st.error(f"❌ Erro ao gravar: {e}")
+        st.error(f"Erro ao salvar: {e}")
 
 # --- 5. LOGIN ---
-st.sidebar.title("🔐 Acesso OnCall")
+st.sidebar.title("🚑 OnCall Auto-Repair")
 user_email = st.sidebar.selectbox("Usuário:", options=["Selecione..."] + sorted(list(dict_users.keys())))
 autenticado = False
-if user_email != "Selecione...":
+if user_email != "Selecione..." and dict_users:
     senha = st.sidebar.text_input("Senha:", type="password")
     if senha == dict_users.get(user_email, {}).get("senha"): autenticado = True
     elif senha: st.sidebar.error("Senha incorreta.")
@@ -90,20 +102,18 @@ if not autenticado:
 # --- 6. INTERFACE ---
 tabs = st.tabs(["📝 Lançar", "📊 Dash", "🛡️ Admin", "📈 BI", "⚙️ Config"]) if user_email in ADMINS else st.tabs(["📝 Lançar", "📊 Dash"])
 
-# === ABA: LANÇAR ===
+# === LANÇAR ===
 with tabs[0]:
     met = st.radio("Método:", ["Dinâmico", "Massa"], horizontal=True)
     if met == "Dinâmico":
         with st.form("f_lan"):
-            st.markdown("### Registrar Atividade")
-            # Cria DataFrame temporário para o editor
+            st.markdown("### Novo Lançamento")
             df_ed = st.data_editor(pd.DataFrame(columns=["projeto","tipo","data","horas","descricão"]), num_rows="dynamic", use_container_width=True,
                 column_config={"projeto": st.column_config.SelectboxColumn(options=lista_projetos, required=True),
                                "tipo": st.column_config.SelectboxColumn(options=["Front-end","Back-end","Banco de Dados","Infra","Testes","Reunião","Outros"]),
                                "data": st.column_config.DateColumn(default=datetime.now()),
                                "horas": st.column_config.NumberColumn(min_value=0.5, step=0.5)})
-            
-            if st.form_submit_button("🚀 Gravar Lançamentos"):
+            if st.form_submit_button("🚀 Salvar"):
                 if not df_ed.empty:
                     novos = []
                     v_h = dict_users[user_email]["valor"]
@@ -112,74 +122,42 @@ with tabs[0]:
                         novos.append({
                             "id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]),
-                            "status_aprovaca": "Pendente", "data_decisao": "", 
-                            "competencia": r["data"].strftime("%Y-%m")[:7],
-                            "tipo": r["tipo"], "descricão": r["descricão"], 
-                            "email_enviado": "", "valor_hora_historico": str(v_h)
+                            "status_aprovaca": "Pendente", "data_decisao": "", "competencia": r["data"].strftime("%Y-%m")[:7],
+                            "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)
                         })
-                    if novos:
-                        # Concatena com a base existente para não perder o que já tem
-                        df_final = pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True)
-                        salvar_blindado("lancamentos", df_final)
+                    if novos: salvar("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
     else:
         arq = st.file_uploader("CSV/Excel")
         if arq and st.button("Importar"):
             df_m = pd.read_csv(arq) if arq.name.endswith('.csv') else pd.read_excel(arq)
-            v_h = dict_users[user_email]["valor"]
-            novos = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(v_h)} for _, r in df_m.iterrows()]
-            salvar_blindado("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
+            novos = [{"id": str(uuid.uuid4()), "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "colaborador_email": user_email, "projeto": r["projeto"], "horas": str(r["horas"]), "status_aprovaca": "Pendente", "data_decisao": "", "competencia": str(r["data"])[:7], "tipo": r["tipo"], "descricão": r["descricão"], "email_enviado": "", "valor_hora_historico": str(dict_users[user_email]["valor"])} for _, r in df_m.iterrows()]
+            salvar("lancamentos", pd.concat([df_lan, pd.DataFrame(novos)], ignore_index=True))
 
-# === ABA: DASHBOARD ===
+# === DASHBOARD ===
 with tabs[1]:
     meus = df_lan[df_lan["colaborador_email"] == user_email].copy()
     meus["horas"] = pd.to_numeric(meus["horas"], errors="coerce").fillna(0)
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Aprovado", f"{meus[meus['status_aprovaca']=='Aprovado']['horas'].sum():.1f}h")
-    c2.metric("Pago", f"{meus[meus['status_aprovaca']=='Pago']['horas'].sum():.1f}h")
-    c3.metric("Pendente", f"{meus[meus['status_aprovaca']=='Pendente']['horas'].sum():.1f}h")
-    c4.metric("Rejeitado", f"{meus[meus['status_aprovaca']=='Rejeitado']['horas'].sum():.1f}h")
+    st.metric("Total Horas", f"{meus['horas'].sum():.1f}h")
     st.dataframe(meus.sort_values("data_registro", ascending=False), use_container_width=True, hide_index=True)
 
-# === ABA: ADMIN & BI ===
+# === ADMIN ===
 if user_email in ADMINS:
-    with tabs[2]: # Admin
-        s1, s2 = st.tabs(["Geral (Tabelona)", "Pagamentos"])
-        with s1:
-            with st.form("f_adm"):
-                df_edt = st.data_editor(df_lan, num_rows="dynamic", use_container_width=True)
-                if st.form_submit_button("Salvar Geral"): salvar_blindado("lancamentos", df_edt)
-        with s2:
-            mes = st.selectbox("Mês:", sorted(df_lan["competencia"].unique(), reverse=True))
-            if st.button(f"Pagar {mes}"):
-                df_lan.loc[(df_lan["competencia"]==mes) & (df_lan["status_aprovaca"]=="Aprovado"), "status_aprovaca"] = "Pago"
-                salvar_blindado("lancamentos", df_lan)
-
+    with tabs[2]:
+        with st.form("f_adm"):
+            df_edt = st.data_editor(df_lan, num_rows="dynamic", use_container_width=True)
+            if st.form_submit_button("Salvar Geral"): salvar("lancamentos", df_edt)
     with tabs[3]: # BI
         df_bi = df_lan.copy()
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
         df_bi["custo"] = df_bi["horas"] * pd.to_numeric(df_bi["valor_hora_historico"], errors="coerce").fillna(0)
-        val = df_bi[df_bi["status_aprovaca"].isin(["Aprovado","Pago"])]
-        
-        c1, c2 = st.columns(2)
-        c1.metric("R$ Investimento Total", f"R$ {val['custo'].sum():,.2f}")
-        c2.metric("Horas Totais", f"{val['horas'].sum():.1f}h")
-        
-        st.divider()
-        g1, g2 = st.columns(2)
-        with g1: 
-            st.markdown("### Por Projeto")
-            st.bar_chart(val.groupby("projeto")["custo"].sum())
-        with g2: 
-            st.markdown("### Por Tipo")
-            st.bar_chart(val.groupby("tipo")["horas"].sum())
-
-    with tabs[4]: # Config
+        st.bar_chart(df_bi.groupby("projeto")["custo"].sum())
+    with tabs[4]: # CONFIG
         c1, c2 = st.tabs(["Usuários", "Projetos"])
         with c1:
             with st.form("fu"):
                 du = st.data_editor(df_u_raw, num_rows="dynamic", use_container_width=True)
-                if st.form_submit_button("Salvar Usuários"): salvar_blindado("config_usuarios", du.dropna(subset=["emails_autorizados"]))
+                if st.form_submit_button("Salvar"): salvar("config_usuarios", du.dropna(subset=["emails_autorizados"]))
         with c2:
             with st.form("fp"):
                 dp = st.data_editor(df_p_raw, num_rows="dynamic", use_container_width=True)
-                if st.form_submit_button("Salvar Projetos"): salvar_blindado("config_projetos", dp.dropna(subset=["projetos"]))
+                if st.form_submit_button("Salvar"): salvar("config_projetos", dp.dropna(subset=["projetos"]))
