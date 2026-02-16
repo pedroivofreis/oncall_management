@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 import time
 
-st.set_page_config(page_title="Gestão OnCall", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Oncall Management - v6", layout="wide", page_icon="🚀")
 
 # --- 1. CONEXÃO ---
 try:
@@ -14,21 +14,19 @@ except Exception as e:
     st.error(f"Erro de Conexão: {e}")
     st.stop()
 
-# --- 2. CARREGAMENTO DOS DADOS ---
-# ttl=0 garante que estamos vendo a verdade nua e crua da planilha
+# --- 2. CARREGAMENTO ---
 try:
     df_config = conn.read(worksheet="config", ttl=0)
     df_lancamentos = conn.read(worksheet="lancamentos", ttl=0)
 except:
-    # Fallback se der erro na leitura
     df_config = pd.DataFrame(columns=["projetos", "emails_autorizados", "valor_hora"])
     df_lancamentos = pd.DataFrame(columns=["id", "data_registro", "competencia", "colaborador_email", "projeto", "tipo", "horas", "descricao", "status_aprovaca", "data_decisao"])
 
-# --- 3. TRATAMENTO / MIGRAÇÃO (PARA DADOS ANTIGOS) ---
+# Tratamento de colunas novas
 if "competencia" not in df_lancamentos.columns: df_lancamentos["competencia"] = ""
 if "tipo" not in df_lancamentos.columns: df_lancamentos["tipo"] = "Geral"
 
-# Corrige competências vazias
+# Correção de dados antigos
 mask_vazia = df_lancamentos["competencia"].isna() | (df_lancamentos["competencia"] == "") | (df_lancamentos["competencia"] == "nan")
 if mask_vazia.any():
     datas_temp = pd.to_datetime(df_lancamentos.loc[mask_vazia, "data_registro"], errors='coerce')
@@ -38,28 +36,36 @@ if mask_vazia.any():
 df_lancamentos["status_aprovaca"] = df_lancamentos["status_aprovaca"].fillna("Pendente").replace("", "Pendente")
 df_lancamentos["tipo"] = df_lancamentos["tipo"].fillna("Geral").replace("nan", "Geral")
 
-# --- 4. PREPARAÇÃO DAS LISTAS DE CONFIGURAÇÃO ---
-# (Essa parte é crucial para o salvamento correto)
+# --- 3. VARIÁVEIS E LOGICA DE PREÇO ---
 try:
     # Projetos
     raw_proj = df_config["projetos"].unique().tolist()
     lista_projetos = [str(x).strip() for x in raw_proj if x and str(x).lower() not in ["nan", "none", "", "0"]]
     if not lista_projetos: lista_projetos = ["Sistema de horas"]
 
-    # Emails
-    raw_email = df_config["emails_autorizados"].unique().tolist()
-    lista_emails = [str(x).strip() for x in raw_email if x and str(x).lower() not in ["nan", "none", "", "0"] and "@" in str(x)]
+    # Emails e Valores (Agora vinculados)
+    # Cria um dicionário: {'email': valor}
+    # Assume que a linha do email corresponde a linha do valor na config
+    df_users = df_config[["emails_autorizados", "valor_hora"]].dropna(subset=["emails_autorizados"])
+    # Limpa e cria dicionário
+    dict_valores = {}
+    lista_emails = []
     
-    # Valor Hora
-    try:
-        valor_hora_padrao = float(df_config["valor_hora"].dropna().iloc[0])
-    except:
-        valor_hora_padrao = 100.0
+    for _, row in df_users.iterrows():
+        email_limpo = str(row["emails_autorizados"]).strip()
+        if "@" in email_limpo and email_limpo.lower() not in ["nan", "none"]:
+            lista_emails.append(email_limpo)
+            try:
+                # Tenta pegar o valor na mesma linha, se falhar usa 0
+                val = float(str(row["valor_hora"]).replace(",", "."))
+            except:
+                val = 0.0
+            dict_valores[email_limpo] = val
+            
 except Exception as e:
     st.error(f"Erro ao processar configurações: {e}")
     st.stop()
 
-# --- 5. CONTROLE DE ACESSO ---
 try:
     user_email = st.user.email
     if user_email is None: raise Exception()
@@ -69,11 +75,11 @@ except:
 ADMINS = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 if user_email not in ADMINS and user_email not in lista_emails:
-    st.error(f"🔒 Acesso negado para {user_email}. Peça para um admin te cadastrar na aba Configurações.")
+    st.error(f"🔒 Acesso negado para {user_email}. Peça para um admin te cadastrar.")
     st.stop()
 
-# --- 6. INTERFACE ---
-st.title("🚀 Gestão OnCall")
+# --- 5. INTERFACE ---
+st.title("Oncall Management - v6 (by Pedro Reis)")
 
 tabs_list = ["📝 Lançar"]
 if user_email in ADMINS:
@@ -81,25 +87,31 @@ if user_email in ADMINS:
 
 abas = st.tabs(tabs_list)
 
-# === ABA 1: LANÇAR ===
+# === ABA 1: LANÇAR (COM DATA EDITÁVEL) ===
 with abas[0]:
     st.caption(f"Logado como: {user_email}")
     with st.form("form_lan", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         proj = c1.selectbox("Projeto", lista_projetos)
         tipo_ativ = c2.selectbox("Tipo", ["Front-end", "Back-end", "Banco de Dados", "Infraestrutura", "Reunião", "Outros"])
-        hor = c3.number_input("Horas", min_value=0.5, step=0.5, format="%.1f")
+        
+        # DATA EDITÁVEL (P2)
+        data_user = c3.date_input("Data da Atividade", value=datetime.now())
         
         c4, c5 = st.columns([1, 2])
-        comp_atual = datetime.now().strftime("%Y-%m")
-        c4.text_input("Competência", value=comp_atual, disabled=True)
+        hor = c4.number_input("Horas", min_value=0.5, step=0.5, format="%.1f")
         desc = c5.text_area("Descrição")
         
         if st.form_submit_button("Enviar Registro"):
+            # Calcula competência baseada na data escolhida pelo usuário
+            comp_calc = data_user.strftime("%Y-%m")
+            # Adiciona hora atual para o registro ficar completo
+            data_completa = data_user.strftime("%Y-%m-%d") + " " + datetime.now().strftime("%H:%M:%S")
+            
             novo = pd.DataFrame([{
                 "id": str(uuid.uuid4()),
-                "data_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "competencia": comp_atual,
+                "data_registro": data_completa,
+                "competencia": comp_calc,
                 "colaborador_email": user_email,
                 "projeto": proj,
                 "tipo": tipo_ativ,
@@ -110,7 +122,7 @@ with abas[0]:
             }])
             final = pd.concat([df_lancamentos, novo], ignore_index=True).astype(str)
             conn.update(worksheet="lancamentos", data=final)
-            st.success("✅ Registro salvo com sucesso!")
+            st.success(f"✅ Registro salvo para {data_user.strftime('%d/%m/%Y')}!")
             st.rerun()
 
 # === ÁREA ADMIN ===
@@ -120,7 +132,6 @@ if user_email in ADMINS:
     with abas[1]:
         st.subheader("🛡️ Central de Controle")
         
-        # IMPORTADOR
         with st.expander("📥 Importar Excel Retroativo"):
             arquivo = st.file_uploader("Arquivo .xlsx", type=["xlsx"])
             if arquivo and st.button("Processar Importação"):
@@ -153,7 +164,6 @@ if user_email in ADMINS:
                             time.sleep(1); st.rerun()
                 except Exception as e: st.error(f"Erro: {e}")
 
-        # EDITOR GERAL
         st.divider()
         st.write("#### 📝 Edição Geral")
         edited_df = st.data_editor(
@@ -176,8 +186,16 @@ if user_email in ADMINS:
     # ABA 3: BI
     with abas[2]:
         st.subheader("📊 Inteligência Financeira")
+        
+        # Prepara dados e adiciona coluna de Valor Hora Individual
         df_bi = df_lancamentos.copy()
         df_bi["horas"] = pd.to_numeric(df_bi["horas"], errors="coerce").fillna(0)
+        
+        # Mapeia o valor hora para cada registro baseado no email
+        # Se não achar o email na config, usa 0
+        df_bi["valor_hora_aplicado"] = df_bi["colaborador_email"].map(dict_valores).fillna(0)
+        df_bi["custo_total"] = df_bi["horas"] * df_bi["valor_hora_aplicado"]
+        
         c_f, c_k = st.columns([1, 3])
         with c_f:
             ms = sorted([x for x in df_bi["competencia"].unique() if x], reverse=True)
@@ -185,61 +203,127 @@ if user_email in ADMINS:
         
         view = df_bi if sel_m == "TODOS" else df_bi[df_bi["competencia"] == sel_m]
         apr = view[view["status_aprovaca"] == "Aprovado"]
+        
         tot_h = apr["horas"].sum()
+        tot_custo = apr["custo_total"].sum()
         
         with c_k:
             k1, k2, k3 = st.columns(3)
-            k1.metric("Horas", f"{tot_h:.1f}h"); k2.metric("Total R$", f"R$ {tot_h * valor_hora_padrao:,.2f}"); k3.metric("Registros", len(apr))
+            k1.metric("Horas Aprovadas", f"{tot_h:.1f}h")
+            k2.metric("Custo Total", f"R$ {tot_custo:,.2f}")
+            k3.metric("Registros", len(apr))
+            
         st.divider()
+        
+        # GRÁFICOS SOLICITADOS (P3)
         c1, c2 = st.columns(2)
+        
         with c1:
             if not apr.empty:
-                g = apr.groupby("colaborador_email").agg(Horas=("horas", "sum")).reset_index()
-                g["R$"] = g["Horas"] * valor_hora_padrao
-                st.dataframe(g, hide_index=True, use_container_width=True)
+                st.markdown("### 🏗️ Custo por Projeto")
+                custo_proj = apr.groupby("projeto")["custo_total"].sum()
+                st.bar_chart(custo_proj, color="#00FF00") # Verde dinheiro
+                
         with c2:
-            if not apr.empty: st.bar_chart(apr.groupby("tipo")["horas"].sum())
+            if not apr.empty:
+                st.markdown("### 🛠️ Horas por Tipo de Demanda")
+                st.bar_chart(apr.groupby("tipo")["horas"].sum())
+        
+        st.divider()
+        st.markdown("### 👥 Detalhe por Colaborador")
+        if not apr.empty:
+            # Agrupa e recalcula para mostrar o valor hora médio se houver variação
+            grp = apr.groupby("colaborador_email").agg(
+                Horas=("horas", "sum"),
+                Valor_Receber=("custo_total", "sum")
+            ).reset_index()
+            
+            # Adiciona coluna de valor hora configurado atual para referência
+            grp["Valor Hora (Config)"] = grp["colaborador_email"].map(dict_valores).fillna(0)
+            
+            st.dataframe(
+                grp,
+                column_config={
+                    "Valor_Receber": st.column_config.NumberColumn("A Receber (R$)", format="R$ %.2f"),
+                    "Valor Hora (Config)": st.column_config.NumberColumn("Valor/h Atual", format="R$ %.2f"),
+                    "Horas": st.column_config.NumberColumn(format="%.1f h")
+                },
+                hide_index=True, use_container_width=True
+            )
 
-    # ABA 4: CONFIGURAÇÕES (DESACOPLADA E SEGURA)
+    # ABA 4: CONFIGURAÇÕES (VINCULADA)
     with abas[3]:
         st.subheader("⚙️ Configurações do Sistema")
-        st.info("💡 As listas abaixo são independentes. Edite e clique em Salvar.")
+        st.info("💡 **Atenção:** Agora o Valor Hora fica ao lado do E-mail.")
         
-        c_proj, c_email, c_val = st.columns(3)
-        with c_proj:
+        col_proj, col_users = st.columns([1, 2])
+        
+        with col_proj:
             st.markdown("##### 📂 Projetos")
-            # Usa os dados carregados do sheet para preencher o editor
             df_p = pd.DataFrame({"projetos": lista_projetos})
             edit_p = st.data_editor(df_p, num_rows="dynamic", key="editor_projetos", hide_index=True, use_container_width=True)
             
-        with c_email:
-            st.markdown("##### 📧 Emails")
-            df_e = pd.DataFrame({"emails_autorizados": lista_emails})
-            edit_e = st.data_editor(df_e, num_rows="dynamic", key="editor_emails", hide_index=True, use_container_width=True)
+        with col_users:
+            st.markdown("##### 👥 Colaboradores & Valores")
+            # Prepara dataframe combinado para edição
+            # Garante que as listas tenham o mesmo tamanho preenchendo com vazio se precisar, 
+            # mas aqui vamos carregar o que tem no banco
             
-        with c_val:
-            st.markdown("##### 💰 Valor Hora")
-            novo_val = st.number_input("R$", value=valor_hora_padrao, step=10.0)
-
-        # DEBUG: Ver o que vai ser salvo
-        with st.expander("🕵️‍♂️ Ver dados antes de Salvar (Debug)"):
-            st.write("Projetos detectados:", edit_p["projetos"].tolist())
-            st.write("Emails detectados:", edit_e["emails_autorizados"].tolist())
+            # Recarrega raw para garantir alinhamento
+            raw_e = df_config["emails_autorizados"].tolist()
+            raw_v = df_config["valor_hora"].tolist()
+            
+            # Ajusta tamanhos
+            max_len = max(len(raw_e), len(raw_v))
+            raw_e += [""] * (max_len - len(raw_e))
+            raw_v += [""] * (max_len - len(raw_v))
+            
+            df_u = pd.DataFrame({
+                "emails_autorizados": raw_e,
+                "valor_hora": raw_v
+            })
+            
+            edit_u = st.data_editor(
+                df_u, 
+                num_rows="dynamic", 
+                key="editor_users", 
+                hide_index=True, 
+                use_container_width=True,
+                column_config={
+                    "valor_hora": st.column_config.TextColumn("Valor Hora (R$)", help="Use ponto para centavos. Ex: 150.50")
+                }
+            )
 
         if st.button("💾 Salvar Configurações"):
-            # 1. Extração Limpa (Remove vazios e Nones)
+            # 1. Limpeza Projetos
             p_clean = [str(x).strip() for x in edit_p["projetos"].tolist() if str(x).strip() not in ["", "nan", "None"]]
-            e_clean = [str(x).strip() for x in edit_e["emails_autorizados"].tolist() if str(x).strip() not in ["", "nan", "None"]]
+            if not p_clean: p_clean = ["Sistema de horas"]
             
-            # 2. Garante que não está zerado (Backup de segurança)
-            if not p_clean: p_clean = ["Sistema de horas"] # Nunca deixa zerar projetos
+            # 2. Limpeza Usuários + Valores (Mantendo o par)
+            e_clean = []
+            v_clean = []
             
-            # 3. Criação do Quadrado Perfeito
+            for index, row in edit_u.iterrows():
+                e_val = str(row["emails_autorizados"]).strip()
+                v_val = str(row["valor_hora"]).strip()
+                
+                # Só salva se tiver email
+                if e_val and e_val not in ["", "nan", "None"]:
+                    e_clean.append(e_val)
+                    # Tenta limpar o valor monetário
+                    try:
+                        # Aceita virgula ou ponto
+                        v_float = float(v_val.replace(",", "."))
+                        v_clean.append(v_float)
+                    except:
+                        v_clean.append(0.0)
+            
+            # 3. Quadrado Perfeito
             max_len = max(len(p_clean), len(e_clean), 1)
             
             p_final = p_clean + [""] * (max_len - len(p_clean))
             e_final = e_clean + [""] * (max_len - len(e_clean))
-            v_final = [novo_val] + [""] * (max_len - 1)
+            v_final = v_clean + [""] * (max_len - len(v_clean))
             
             df_save = pd.DataFrame({
                 "projetos": p_final,
@@ -247,13 +331,11 @@ if user_email in ADMINS:
                 "valor_hora": v_final
             })
             
-            # 4. Gravação
             conn.update(worksheet="config", data=df_save.astype(str))
             
-            # 5. Limpeza de Cache Obrigatória
             st.cache_data.clear()
             st.cache_resource.clear()
             
-            st.success("✅ Configurações salvas! A página irá recarregar.")
+            st.success("✅ Configurações salvas! Valor hora atualizado.")
             time.sleep(2)
             st.rerun()
