@@ -208,7 +208,7 @@ opcoes_visual = [f"{email_to_name.get(e, e)} ({e})" for e in lista_emails]
 # Cria mapa reverso: "Nome (Email)" -> "email@dominio.com"
 login_map = dict(zip(opcoes_visual, lista_emails))
 
-user_selection = st.sidebar.selectbox("👤 Identifique-se:", ["..."] + options=opcoes_visual)
+user_selection = st.sidebar.selectbox("👤 Identifique-se:", ["..."] + opcoes_visual)
 
 if user_selection == "...":
     st.info("👈 Selecione seu usuário no menu lateral para acessar o sistema.")
