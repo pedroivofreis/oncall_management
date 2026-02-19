@@ -1,25 +1,42 @@
 """
-==============================================================================
-ONCALL HUMANA - SYSTEM MASTER v12.0 "FINAL STABLE"
-==============================================================================
+====================================================================================================
+ONCALL HUMANA ERP - SYSTEM MASTER v12.1 "INFINITY STABLE"
+====================================================================================================
 Desenvolvido por: Pedro Reis
 Data: Fevereiro/2026
-Versão: 12.0 Enterprise Edition (Procedural & Robust)
+Versão: 12.1 Enterprise Edition (Procedural Architecture)
 
-DESCRIÇÃO TÉCNICA:
-Sistema de ERP para gestão de horas, pagamentos e projetos.
-Esta versão corrige erros de sintaxe da v9.0 e expande a segurança
-e o tratamento de dados, mantendo a arquitetura linear que funcionava.
+DESCRIÇÃO TÉCNICA DO SISTEMA:
+-----------------------------
+Este é um sistema de ERP (Enterprise Resource Planning) focado na gestão de timesheets (horas),
+aprovações gerenciais, fluxo financeiro e inteligência de dados (BI).
 
-FUNCIONALIDADES CRÍTICAS:
-1. Mapeamento de Nomes (Visualização amigável).
-2. Tratamento de Data Real vs Competência Financeira.
-3. Edição pelo Usuário com Flag de Auditoria (foi_editado).
-4. Painel Administrativo Bipartido com Bulk Import inteligente.
+A arquitetura segue o padrão PROCEDURAL (Functional-Based) para garantir estabilidade de execução
+no ambiente do Streamlit, evitando problemas de estado de sessão comuns em abordagens OOP puras.
 
-TECNOLOGIAS:
-Streamlit, Pandas, SQLAlchemy, PostgreSQL (Neon).
-==============================================================================
+MÓDULOS DO SISTEMA:
+1. CONFIGURAÇÃO: Definições de página, CSS e constantes.
+2. DATABASE: Gerenciamento de conexão PostgreSQL com tratamento de reconexão.
+3. UTILS: Funções de conversão matemática (HH.MM -> Decimal) e normalização de texto.
+4. AUTH: Sistema de login, mapeamento de nomes (Email -> Nome Real) e controle de permissões.
+5. VIEW - LANÇAMENTOS: Formulário de input para colaboradores.
+6. VIEW - HISTÓRICO: Interface para o colaborador ver e editar seus itens pendentes.
+7. VIEW - PAINEL: Dashboards financeiros com filtros de competência (Mês/Ano).
+8. VIEW - ADMIN: Central de aprovação, edição em massa e correção de dados.
+   **FEATURE CRÍTICA:** Sincronia automática entre Data Real e Competência Financeira.
+9. VIEW - FINANCEIRO: Consolidação de pagamentos e drill-down por colaborador.
+10. VIEW - BI: Gráficos executivos.
+11. VIEW - CONFIG: CRUD de tabelas auxiliares (Usuários, Projetos, Bancos).
+
+TABELAS DO BANCO DE DADOS (SCHEMA):
+- usuarios: email (PK), senha, valor_hora, is_admin, nome
+- projetos: nome (PK)
+- dados_bancarios: colaborador_email (PK), banco, tipo_chave, chave_pix
+- lancamentos: id (PK), colaborador_email, projeto, horas, competencia, data_atividade,
+               tipo, descricao, data_registro, valor_hora_historico, status_aprovaca,
+               status_pagamento, foi_editado
+
+====================================================================================================
 """
 
 import streamlit as st
@@ -31,26 +48,33 @@ import io
 from sqlalchemy import text
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO INICIAL DA PÁGINA
+# 1. CONFIGURAÇÃO INICIAL DA PÁGINA E META-DADOS
 # ==============================================================================
 st.set_page_config(
-    page_title="OnCall Humana - Master v12.0",
+    page_title="OnCall Humana - Master v12.1",
     layout="wide",
     page_icon="🛡️",
     initial_sidebar_state="expanded",
     menu_items={
         'Get Help': 'https://www.oncall.com.br/help',
         'Report a bug': "mailto:suporte@oncall.com.br",
-        'About': "# OnCall Humana ERP v12.0\nSistema Oficial."
+        'About': """
+        # OnCall Humana ERP v12.1
+        Sistema oficial de gestão de horas e pagamentos.
+        Desenvolvido com Python/Streamlit e PostgreSQL.
+        """
     }
 )
 
 # ==============================================================================
-# 2. ESTILIZAÇÃO CSS AVANÇADA (ENTERPRISE UI)
+# 2. ESTILIZAÇÃO CSS AVANÇADA (ENTERPRISE UI/UX)
 # ==============================================================================
+# O CSS abaixo garante que a interface seja legível tanto no modo claro quanto escuro,
+# além de padronizar componentes como botões, tabelas e cards de métricas.
+
 st.markdown("""
 <style>
-    /* Ajuste do container principal */
+    /* Ajuste do container principal para maximizar a área útil */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 5rem;
@@ -58,6 +82,7 @@ st.markdown("""
     }
 
     /* Estilo dos Cards de Métricas (KPIs) */
+    /* Adiciona borda suave e fundo translúcido para destaque */
     div[data-testid="stMetric"] {
         background-color: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(128, 128, 128, 0.2);
@@ -71,65 +96,87 @@ st.markdown("""
         transform: translateY(-2px);
     }
 
-    /* Labels de formulários mais legíveis */
+    /* Labels de formulários mais legíveis e fortes */
     label {
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         font-size: 0.95rem !important;
         color: inherit;
+        letter-spacing: 0.02em;
     }
 
-    /* Cabeçalhos de Expander mais destacados */
+    /* Cabeçalhos de Expander mais destacados (Azul Corporativo) */
     .streamlit-expanderHeader {
         font-weight: 700;
         font-size: 1.05rem;
         color: #0f54c9;
         background-color: rgba(128, 128, 128, 0.05);
         border-radius: 5px;
+        padding: 10px;
     }
 
     /* Tabelas (Dataframes) com bordas definidas */
     div[data-testid="stDataFrame"] {
         border: 1px solid rgba(128, 128, 128, 0.15);
         border-radius: 5px;
+        padding: 2px;
     }
 
-    /* Botões Primários */
+    /* Botões Primários (Gradiente Azul) */
     button[kind="primary"] {
         font-weight: bold;
         border: 1px solid rgba(255, 75, 75, 0.5);
+        background: linear-gradient(90deg, #0f54c9 0%, #0a3a8b 100%);
+        color: white;
     }
     
-    /* Alerta de Edição */
+    /* Alerta de Edição (Texto Vermelho) */
     .edited-alert {
         color: #ff4b4b;
         font-weight: bold;
+        font-size: 0.8rem;
+    }
+    
+    /* Toast Notifications */
+    div[data-testid="stToast"] {
+        padding: 1rem;
+        border-radius: 8px;
+        font-weight: 500;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 3. GERENCIAMENTO DE CONEXÃO COM O BANCO DE DADOS
+# 3. GERENCIAMENTO DE CONEXÃO COM O BANCO DE DADOS (DAL)
 # ==============================================================================
 def get_connection():
     """
-    Estabelece conexão segura com o banco de dados Neon (PostgreSQL).
-    Retorna o objeto de conexão ou para a aplicação em erro.
+    Estabelece uma conexão segura e persistente com o banco de dados Neon (PostgreSQL).
+    
+    Mecanismo de Segurança:
+    - Utiliza st.connection para cache inteligente de recursos.
+    - Executa uma query leve ("SELECT 1") imediatamente após conectar.
+      Isso serve como um "Wake-up Call" para bancos Serverless que entram em modo de suspensão,
+      evitando que a primeira query real do usuário falhe por timeout.
+    
+    Returns:
+        SQLAlchemy Engine Connection object.
     """
     try:
         # Cria a conexão usando a engine nativa do Streamlit
         c = st.connection("postgresql", type="sql")
         
-        # Query leve para 'acordar' o banco serverless e testar latência
+        # Query de verificação de latência e saúde
         c.query("SELECT 1", ttl=0) 
         
         return c
     except Exception as e:
+        # Em caso de falha crítica, interrompe a aplicação para evitar comportamento instável
         st.error("🔴 Erro Crítico de Conexão com o Banco de Dados.")
         st.error(f"Detalhe técnico: {e}")
-        st.info("Verifique a internet ou as credenciais em .streamlit/secrets.toml")
+        st.info("Verifique sua conexão com a internet ou as credenciais no arquivo .streamlit/secrets.toml")
         st.stop()
 
-# Instância global da conexão
+# Instância global da conexão para ser reutilizada
 conn = get_connection()
 
 # ==============================================================================
@@ -138,100 +185,166 @@ conn = get_connection()
 
 def convert_hhmm_to_decimal(pseudo_hour):
     """
-    Converte o formato visual HH.MM (Ex: 2.30) para Decimal (2.50).
-    Isso é fundamental para que o cálculo financeiro (Horas * Valor) seja exato.
+    Converte o formato visual de horas HH.MM (Ex: 2.30) para formato Decimal (2.50).
+    
+    Lógica de Negócio:
+    - O sistema financeiro calcula valor baseando-se em horas decimais.
+    - O usuário digita "2.30" querendo dizer "2 horas e 30 minutos".
+    - Matematicamente, 2h30min é igual a 2.5 horas.
+    - Esta função realiza essa conversão.
+    
+    Args:
+        pseudo_hour (float/str): O valor digitado pelo usuário.
+        
+    Returns:
+        float: O valor convertido em horas decimais.
     """
     try:
+        # Tratamento de valores nulos ou vazios
         if pd.isna(pseudo_hour) or pseudo_hour == "":
             return 0.0
         
+        # Garante que tratamos como string formatada com 2 casas
         val_str = f"{float(pseudo_hour):.2f}"
+        
+        # Separa a parte inteira (horas) da decimal (minutos)
         parts = val_str.split('.')
         
+        # Se não houver ponto decimal, assume horas inteiras
         if len(parts) != 2:
             return float(pseudo_hour)
             
         horas_inteiras = int(parts[0])
         minutos = int(parts[1])
         
-        # Proteção: Se minutos >= 60, assume decimal puro
+        # Proteção contra erro de usuário:
+        # Se o usuário digitar 1.90 (90 minutos), assumimos que ele errou
+        # ou que já está tentando inserir decimal.
+        # Regra: Se minutos >= 60, trata como decimal puro.
         if minutos >= 60:
             return float(pseudo_hour)
             
-        # Cálculo: Horas + (Minutos / 60)
+        # Cálculo final: Horas + (Minutos / 60)
         return horas_inteiras + (minutos / 60.0)
     except Exception:
+        # Em caso de erro de conversão, retorna 0.0 (segurança)
         return 0.0
 
 def normalize_text_fields(text_val):
     """
-    Padroniza strings para garantir consistência no Banco de Dados e BI.
-    Remove espaços extras e resolve variações comuns de escrita.
+    Padroniza strings para garantir consistência no Banco de Dados e nos Gráficos de BI.
+    Remove espaços extras, resolve variações de escrita e capitalização.
+    
+    Exemplos:
+    - 'backend ' -> 'Back-end'
+    - 'Front End' -> 'Front-end'
+    - 'QA' -> 'QA / Testes'
     """
     if not isinstance(text_val, str):
         return "Outros"
         
     t = text_val.strip().lower()
     
-    # Mapeamento de normalização
+    # Mapeamento de normalização (Dicionário de De/Para)
     if "back" in t and "end" in t: return "Back-end"
     if "front" in t and "end" in t: return "Front-end"
     if "dados" in t or "data" in t: return "Eng. Dados"
-    if "infra" in t: return "Infraestrutura"
+    if "infra" in t or "devops" in t: return "Infraestrutura"
     if "qa" in t or "test" in t: return "QA / Testes"
     if "banco" in t: return "Banco de Dados"
-    if "reuni" in t: return "Reunião"
-    if "gest" in t: return "Gestão"
-    if "design" in t: return "Design/UX"
+    if "reuni" in t or "meeting" in t: return "Reunião"
+    if "gest" in t or "agile" in t: return "Gestão"
+    if "design" in t or "ux" in t: return "Design/UX"
+    if "api" in t: return "Integrações/API"
     
     return text_val.capitalize()
+
+def calculate_competence(date_obj):
+    """
+    Gera a string de competência (YYYY-MM) a partir de um objeto de data.
+    Isso é vital para o agrupamento financeiro mensal.
+    """
+    if not date_obj:
+        return datetime.now().strftime("%Y-%m")
+    
+    # Se for string, converte. Se for timestamp, converte.
+    if isinstance(date_obj, str):
+        try:
+            date_obj = datetime.strptime(date_obj, "%Y-%m-%d")
+        except:
+            return datetime.now().strftime("%Y-%m")
+            
+    return date_obj.strftime("%Y-%m")
 
 # ==============================================================================
 # 5. DATA ACCESS LAYER (DAL) - FUNÇÕES DE LEITURA
 # ==============================================================================
+# Todas as funções usam ttl=0 para garantir dados frescos e não cacheados.
 
 def fetch_all_launch_data(): 
-    """Busca a tabela completa de lançamentos."""
-    query = "SELECT * FROM lancamentos ORDER BY competencia DESC, data_atividade DESC, data_registro DESC"
-    return conn.query(query, ttl=0)
+    """
+    Busca a tabela completa de lançamentos.
+    Ordenação Primária: Competência (Decrescente)
+    Ordenação Secundária: Data da Atividade (Decrescente)
+    """
+    try:
+        query = "SELECT * FROM lancamentos ORDER BY competencia DESC, data_atividade DESC, data_registro DESC"
+        return conn.query(query, ttl=0)
+    except Exception as e:
+        st.error(f"Erro ao buscar lançamentos: {e}")
+        return pd.DataFrame()
 
 def fetch_users_data(): 
     """Busca tabela de usuários para login e mapeamento."""
-    return conn.query("SELECT * FROM usuarios ORDER BY email", ttl=0)
+    try:
+        return conn.query("SELECT * FROM usuarios ORDER BY email", ttl=0)
+    except Exception as e:
+        st.error(f"Erro ao buscar usuários: {e}")
+        return pd.DataFrame()
 
 def fetch_projects_data(): 
     """Busca tabela de projetos ativos."""
-    return conn.query("SELECT * FROM projetos ORDER BY nome", ttl=0)
+    try:
+        return conn.query("SELECT * FROM projetos ORDER BY nome", ttl=0)
+    except:
+        return pd.DataFrame(columns=["nome"])
 
 def fetch_banking_data(): 
     """Busca dados bancários para a folha de pagamento."""
-    return conn.query("SELECT * FROM dados_bancarios", ttl=0)
+    try:
+        return conn.query("SELECT * FROM dados_bancarios", ttl=0)
+    except:
+        return pd.DataFrame()
 
 # ==============================================================================
 # 6. SISTEMA DE AUTENTICAÇÃO E GESTÃO DE SESSÃO
 # ==============================================================================
 
-# Carrega dados dos usuários no início
+# Carrega dados dos usuários no início da execução
 try:
     df_u_login = fetch_users_data()
 except Exception as e:
-    st.error("Erro ao carregar usuários. O banco de dados pode estar indisponível.")
+    st.error("Erro fatal: Não foi possível carregar a tabela de usuários.")
     st.stop()
 
 # --- MAPEAMENTO INTELIGENTE DE NOMES ---
-# Cria um dicionário {email: Nome Real} para exibir nomes em vez de e-mails.
+# Cria um dicionário {email: Nome Real} para exibir nomes bonitos em vez de e-mails técnicos.
 email_to_name_map = {}
 
 if not df_u_login.empty:
     for row in df_u_login.itertuples():
+        # Verifica se a coluna 'nome' existe e tem conteúdo válido
         nome_db = getattr(row, 'nome', None)
+        
         if nome_db and str(nome_db).strip() != "":
             email_to_name_map[row.email] = str(nome_db).strip()
         else:
+            # Fallback: Formata o e-mail (pedro.reis@... -> Pedro Reis) se não houver nome
             clean_name = row.email.split('@')[0].replace('.', ' ').title()
             email_to_name_map[row.email] = clean_name
 
-# --- DICIONÁRIO DE AUTENTICAÇÃO ---
+# --- DICIONÁRIO DE AUTENTICAÇÃO E PERMISSÕES ---
+# Estrutura de dados otimizada para verificação rápida de senha e acesso
 auth_db = {}
 if not df_u_login.empty:
     auth_db = {
@@ -243,70 +356,73 @@ if not df_u_login.empty:
         } for row in df_u_login.itertuples()
     }
 
+# Lista de Super Admins (Backdoor de segurança para desenvolvedores/fundadores)
 SUPER_ADMINS_LIST = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 # --- SIDEBAR: TELA DE LOGIN ---
 st.sidebar.title("🛡️ OnCall Humana")
-st.sidebar.caption("v12.0 Final Stable")
+st.sidebar.caption("v12.1 Infinity Stable")
 st.sidebar.markdown("---")
 
 if not auth_db:
-    st.error("Tabela de usuários vazia.")
+    st.error("Tabela de usuários vazia. Contate o suporte.")
     st.stop()
 
-# 1. Lista de chaves (emails)
+# 1. Preparação da Lista para o Selectbox
 lista_emails_sistema = list(auth_db.keys())
 
-# 2. Lista de exibição (Nome + Email)
+# 2. Criação da Lista Visual (Nome + Email para desambiguação)
 opcoes_visuais_login = [f"{email_to_name_map.get(e, e)} ({e})" for e in lista_emails_sistema]
 
-# 3. Mapa reverso (Visual -> Email)
+# 3. Mapa reverso (String Visual -> Email Real)
 login_visual_map = dict(zip(opcoes_visuais_login, lista_emails_sistema))
 
-# 4. Widget Selectbox (AQUI ESTAVA O ERRO DE SINTAXE ANTERIOR, AGORA CORRIGIDO)
+# 4. Widget de Seleção de Usuário
 user_selection_visual = st.sidebar.selectbox(
     "👤 Identifique-se:", 
-    ["..."] + opcoes_visuais_login
+    ["..."] + opcoes_visuais_login,
+    help="Selecione seu nome na lista para iniciar o acesso."
 )
 
-# Bloqueio inicial se não selecionado
+# Bloqueio inicial se nenhum usuário for selecionado
 if user_selection_visual == "...":
-    st.info("👈 Selecione seu usuário no menu lateral.")
+    st.info("👈 Por favor, selecione seu usuário no menu lateral para acessar o sistema.")
     st.image("https://img.freepik.com/free-vector/access-control-system-abstract-concept_335657-3180.jpg", use_container_width=True)
     st.stop()
 
-# Recupera credenciais
+# Recupera credenciais baseadas na seleção
 current_user_email = login_visual_map[user_selection_visual]
 current_user_data = auth_db[current_user_email]
 current_user_name = current_user_data["nome_real"]
 
-# Widget Senha
+# Widget de Senha
 password_attempt = st.sidebar.text_input("🔑 Senha de Acesso:", type="password")
 
-# Validação
+# Validação de Segurança
 if password_attempt != current_user_data["senha"]:
     st.sidebar.error("Senha incorreta.")
     st.stop()
 
-# Definição de Privilégios
+# Definição de Privilégios (Admin vs User)
 is_admin_session = current_user_data["is_admin"] or (current_user_email in SUPER_ADMINS_LIST)
 
-# Feedback de Login
+# Feedback Visual de Login Sucesso
 if is_admin_session:
-    st.sidebar.success(f"Admin: {current_user_name}")
+    st.sidebar.success(f"Logado como ADMIN: {current_user_name}")
 else:
     st.sidebar.info(f"Bem-vindo(a), {current_user_name}")
 
 # ==============================================================================
-# 7. MENU DE NAVEGAÇÃO
+# 7. MENU DE NAVEGAÇÃO E ESTADO DA SESSÃO
 # ==============================================================================
 st.sidebar.divider()
-st.sidebar.subheader("📍 Menu")
+st.sidebar.subheader("📍 Menu Principal")
 
+# Define as opções de menu baseadas no nível de acesso do usuário
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal", # Admin também pode ver o seu
+        "🗂️ Histórico Pessoal", # Admin também pode ver o seu próprio histórico editável
         "📊 Gestão de Painéis", 
         "🛡️ Admin Aprovações", 
         "💸 Pagamentos", 
@@ -320,11 +436,13 @@ else:
         "📊 Meu Painel"
     ]
 
+# Widget de Navegação (Mantém o estado da aplicação)
 selected_tab = st.sidebar.radio("Ir para:", app_menu_options)
 
 # ==============================================================================
-# 8. PREPARAÇÃO DE DADOS GLOBAL
+# 8. PREPARAÇÃO DE DADOS GLOBAL (GLOBAL DATA FETCHING)
 # ==============================================================================
+# Carrega dados essenciais para todas as abas APÓS o login
 try:
     df_lancamentos = fetch_all_launch_data()
     df_projetos = fetch_projects_data()
@@ -333,58 +451,67 @@ except Exception as e:
     st.error(f"Erro ao carregar dados globais: {e}")
     st.stop()
 
+# Listas auxiliares para dropdowns
 lista_projetos_ativos = df_projetos['nome'].tolist() if not df_projetos.empty else ["Sustentação", "Projetos", "Outros"]
 colaboradores_unicos_email = sorted(df_lancamentos['colaborador_email'].unique()) if not df_lancamentos.empty else []
 lista_colaboradores_visual = [f"{email_to_name_map.get(e, e)} ({e})" for e in colaboradores_unicos_email]
 
-# --- TRATAMENTO E ENRIQUECIMENTO DO DATAFRAME ---
+# --- TRATAMENTO E ENRIQUECIMENTO DO DATAFRAME PRINCIPAL ---
 if not df_lancamentos.empty:
-    # 1. Coluna Nome
+    # 1. Injeta a Coluna 'Nome' (Visual) mapeando os emails
     df_lancamentos['Nome'] = df_lancamentos['colaborador_email'].map(email_to_name_map).fillna(df_lancamentos['colaborador_email'])
     
-    # 2. Data Real
+    # 2. Tratamento de Data Real da Atividade
+    # Tenta converter a coluna 'data_atividade' para objeto Date
     if 'data_atividade' in df_lancamentos.columns:
         df_lancamentos['Data Real'] = pd.to_datetime(df_lancamentos['data_atividade'], errors='coerce').dt.date
     else:
         df_lancamentos['Data Real'] = pd.NaT
 
+    # 3. Tratamento de Data de Importação (Log do Sistema)
     df_lancamentos['Importado Em'] = pd.to_datetime(df_lancamentos['data_registro']).dt.date
+    
+    # 4. Fallback de Segurança: Se 'Data Real' estiver nula, usa 'Importado Em'
     df_lancamentos['Data Real'] = df_lancamentos['Data Real'].fillna(df_lancamentos['Importado Em'])
     
-    # 3. Flag de Edição (Garante que a coluna existe no DF mesmo se nula no banco)
+    # 5. Flag de Edição (Garante que a coluna existe no DF mesmo se nula no banco)
     if 'foi_editado' not in df_lancamentos.columns:
         df_lancamentos['foi_editado'] = False
     else:
         df_lancamentos['foi_editado'] = df_lancamentos['foi_editado'].fillna(False).astype(bool)
 
 # ==============================================================================
-# ABA 1: LANÇAMENTOS
+# ABA 1: LANÇAMENTOS (USER INTERFACE)
 # ==============================================================================
 if selected_tab == "📝 Lançamentos":
     st.subheader(f"📝 Registro de Atividade - {current_user_name}")
     
     with st.expander("ℹ️ Guia de Preenchimento", expanded=False):
         st.markdown("""
-        * **Data Real:** Dia da execução.
-        * **Horas:** Use `.` para minutos (ex: 1.30 = 1h30min).
-        * **Descrição:** Detalhe a entrega.
+        * **Data Real:** Dia da execução da tarefa.
+        * **Horas:** Use ponto para minutos (ex: 1.30 = 1h30min).
+        * **Descrição:** Detalhe a entrega de forma clara.
         """)
     
     with st.form("form_lancamento_main", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         input_projeto = c1.selectbox("Projeto", lista_projetos_ativos)
-        input_tipo = c2.selectbox("Tipo", ["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio"])
+        input_tipo = c2.selectbox("Tipo de Atividade", ["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio"])
+        
+        # CAMPO CRÍTICO: DATA DA ATIVIDADE
         input_data = c3.date_input("Data REAL da Atividade", datetime.now())
         
         c4, c5 = st.columns([1, 2])
-        input_horas = c4.number_input("Horas (HH.MM)", min_value=0.0, step=0.10, format="%.2f")
+        input_horas = c4.number_input("Horas (HH.MM)", min_value=0.0, step=0.10, format="%.2f", help="Ex: 1.30 para 1h 30min")
         input_desc = c5.text_input("Descrição Detalhada")
         
         if st.form_submit_button("🚀 Gravar Lançamento", type="primary"):
             if input_horas > 0 and input_desc:
                 try:
-                    competencia_str = input_data.strftime("%Y-%m")
-                    data_full_str = input_data.strftime("%Y-%m-%d")
+                    # GERA AS DUAS VERSÕES DE DATA
+                    competencia_str = input_data.strftime("%Y-%m")      # YYYY-MM
+                    data_full_str = input_data.strftime("%Y-%m-%d")     # YYYY-MM-DD
+                    
                     valor_hora_atual = auth_db[current_user_email]["valor_hora"]
                     
                     with conn.session as s:
@@ -395,61 +522,79 @@ if selected_tab == "📝 Lançamentos":
                                 VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, FALSE)
                             """),
                             {
-                                "id": str(uuid.uuid4()), "e": current_user_email, "p": input_projeto, 
-                                "h": input_horas, "c": competencia_str, "d_atv": data_full_str, 
-                                "t": input_tipo, "d": input_desc, "v": valor_hora_atual
+                                "id": str(uuid.uuid4()), 
+                                "e": current_user_email, 
+                                "p": input_projeto, 
+                                "h": input_horas, 
+                                "c": competencia_str,   # Salva Competência
+                                "d_atv": data_full_str, # Salva Data Real
+                                "t": input_tipo, 
+                                "d": input_desc, 
+                                "v": valor_hora_atual
                             }
                         )
                         s.commit()
-                    st.toast(f"Salvo: {input_horas}h em {data_full_str}", icon="✅")
+                    
+                    st.toast(f"✅ Lançamento salvo: {input_horas}h em {data_full_str}", icon="✅")
                     time.sleep(1.5); st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Erro ao salvar: {e}")
+                    st.error("Erro ao salvar no banco de dados.")
+                    st.error(f"Detalhe: {e}")
             else:
-                st.warning("Preencha horas e descrição.")
+                st.warning("⚠️ Preencha as horas (> 0) e a descrição.")
 
 # ==============================================================================
-# ABA NOVA: HISTÓRICO PESSOAL (EDIÇÃO DE PENDENTES)
+# ABA 2: HISTÓRICO PESSOAL (USER EDITA SEUS PENDENTES)
 # ==============================================================================
 elif selected_tab == "🗂️ Histórico Pessoal":
     st.subheader(f"🗂️ Meus Registros - {current_user_name}")
-    st.info("💡 Você pode editar lançamentos que ainda estão **Pendentes**. A edição notificará o administrador.")
+    st.info("💡 Você pode editar lançamentos que ainda estão **Pendentes**. A edição enviará uma notificação ao administrador.")
     
     # Filtra dados apenas do usuário logado
     my_df = df_lancamentos[df_lancamentos['colaborador_email'] == current_user_email].copy()
     
     if not my_df.empty:
+        # Sistema de Abas Internas
         tab_pend, tab_aprov, tab_neg = st.tabs(["⏳ Pendentes (Editável)", "✅ Aprovados", "❌ Negados"])
         
-        # --- PENDENTES (EDITÁVEL) ---
+        # --- TAB: PENDENTES (EDITÁVEL) ---
         with tab_pend:
             my_pend = my_df[my_df['status_aprovaca'] == 'Pendente'].copy()
             if not my_pend.empty:
-                # Editor de dados
+                # Editor de dados (Usuário pode mudar Data, Horas, Projeto, Descrição)
                 edited_my_pend = st.data_editor(
                     my_pend[['descricao', 'projeto', 'Data Real', 'horas', 'tipo', 'id']],
-                    use_container_width=True, hide_index=True, key="user_edit_pend",
+                    use_container_width=True, 
+                    hide_index=True, 
+                    key="user_edit_pend",
                     column_config={
-                        "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                        "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
                         "horas": st.column_config.NumberColumn("HH.MM", format="%.2f"),
-                        "id": None # Oculta ID
+                        "id": None # Oculta ID para o usuário
                     }
                 )
                 
                 if st.button("💾 Salvar Minhas Edições"):
-                    count = 0
+                    count_edits = 0
                     with conn.session as s:
                         for row in edited_my_pend.itertuples():
                             try:
-                                # Converte data (pode vir como string do editor)
+                                # LÓGICA DE SINCRONIA DATA -> COMPETÊNCIA (USER SIDE)
+                                # Recupera a data do objeto (pode ter sido alterada no editor)
                                 d_val = row.Data_Real if hasattr(row, 'Data_Real') else row._3
-                                if isinstance(d_val, str): d_val = datetime.strptime(d_val, "%Y-%m-%d").date()
-                                elif isinstance(d_val, pd.Timestamp): d_val = d_val.date()
                                 
+                                # Normalização para objeto Date do Python
+                                if isinstance(d_val, str): 
+                                    d_val = datetime.strptime(d_val, "%Y-%m-%d").date()
+                                elif isinstance(d_val, pd.Timestamp): 
+                                    d_val = d_val.date()
+                                
+                                # Recalcula strings
                                 c_s = d_val.strftime("%Y-%m")
                                 d_s = d_val.strftime("%Y-%m-%d")
                                 
-                                # Atualiza e seta flag 'foi_editado' para TRUE
+                                # Atualiza no banco e MARCA COMO EDITADO (foi_editado = TRUE)
                                 s.execute(
                                     text("""
                                         UPDATE lancamentos 
@@ -458,133 +603,193 @@ elif selected_tab == "🗂️ Histórico Pessoal":
                                     """),
                                     {"d": row.descricao, "p": row.projeto, "h": row.horas, "da": d_s, "c": c_s, "id": row.id}
                                 )
-                                count += 1
-                            except Exception as e: st.error(f"Erro linha {row.id}: {e}")
+                                count_edits += 1
+                            except Exception as e: 
+                                st.error(f"Erro ao salvar linha ID {row.id}: {e}")
                         s.commit()
                     
-                    if count > 0:
-                        st.toast("Edições salvas! Admin notificado.", icon="⚠️")
+                    if count_edits > 0:
+                        st.toast("Edições salvas! O Admin foi notificado.", icon="⚠️")
                         time.sleep(1.5); st.rerun()
             else:
-                st.info("Você não tem itens pendentes.")
+                st.info("Você não tem itens pendentes no momento.")
 
-        # --- APROVADOS (READ ONLY) ---
+        # --- TAB: APROVADOS (READ ONLY) ---
         with tab_aprov:
             st.dataframe(
-                my_df[my_df['status_aprovaca'] == 'Aprovado'][['descricao', 'Data Real', 'horas', 'valor_hora_historico']],
-                use_container_width=True, hide_index=True, column_config={"Data Real": st.column_config.DateColumn("Data")}
+                my_df[my_df['status_aprovaca'] == 'Aprovado'][['descricao', 'Data Real', 'horas', 'valor_hora_historico', 'competencia']],
+                use_container_width=True, hide_index=True, 
+                column_config={"Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")}
             )
 
-        # --- NEGADOS (READ ONLY) ---
+        # --- TAB: NEGADOS (READ ONLY) ---
         with tab_neg:
             st.dataframe(
                 my_df[my_df['status_aprovaca'] == 'Negado'][['descricao', 'Data Real', 'horas']],
                 use_container_width=True, hide_index=True
             )
     else:
-        st.info("Nenhum histórico encontrado.")
+        st.info("Nenhum histórico encontrado para seu usuário.")
 
 # ==============================================================================
-# ABA 3: PAINEL GERENCIAL (ADMIN/USER)
+# ABA 3: PAINEL GERENCIAL (ADMIN VE TODOS / USER VE SEU)
 # ==============================================================================
 elif "Painel" in selected_tab or "Gestão" in selected_tab:
-    st.subheader("📊 Painel Financeiro")
+    st.subheader("📊 Painel Financeiro e de Auditoria")
     
+    # 1. Definição do Alvo (Quem estamos analisando?)
     target_email = current_user_email
-    target_name = current_user_name
+    target_name_curr = current_user_name
     
     if is_admin_session:
-        c_sel, _ = st.columns([2, 2])
-        # Lista sem o próprio admin (para não duplicar visualmente)
-        others = [x for x in lista_colaboradores_visual if current_user_email not in x]
-        lista_adm = [f"{current_user_name} ({current_user_email})"] + others
+        c_sel_admin, _ = st.columns([2, 2])
         
-        sel_vis = c_sel.selectbox("👁️ (Admin) Visualizar:", lista_adm)
-        target_email = sel_vis.split('(')[-1].replace(')', '')
-        target_name = email_to_name_map.get(target_email, target_email)
+        # Filtra a lista para remover o próprio admin duplicado e adicionar no topo
+        lista_outros = [x for x in lista_colaboradores_visual if current_user_email not in x]
+        lista_adm_completa = [f"{current_user_name} ({current_user_email})"] + lista_outros
+        
+        sel_admin_val = c_sel_admin.selectbox(
+            "👁️ (Admin) Visualizar Painel de:", 
+            lista_adm_completa,
+            help="Selecione um colaborador para auditar."
+        )
+        
+        # Extrai email
+        target_email = sel_admin_val.split('(')[-1].replace(')', '')
+        target_name_curr = email_to_name_map.get(target_email, target_email)
     
-    st.markdown(f"**Analisando:** `{target_name}`")
+    st.markdown(f"**Analisando dados de:** `{target_name_curr}`")
     
-    # Filtro Competência
+    # 2. Filtro de Competência (Multi-Select)
+    st.write("---")
+    
     if not df_lancamentos.empty:
-        all_comps = sorted(df_lancamentos['competencia'].astype(str).unique(), reverse=True)
-    else: all_comps = []
-    
+        all_competencias = sorted(df_lancamentos['competencia'].astype(str).unique(), reverse=True)
+    else:
+        all_competencias = []
+        
     c_f1, c_f2 = st.columns([1, 3])
-    sel_comps = c_f1.multiselect("📅 Filtrar Competências:", all_comps, default=all_comps[:1] if all_comps else None)
     
-    # Filtragem
+    # Seleção de Mês/Ano
+    comp_selecionadas = c_f1.multiselect(
+        "📅 Filtrar Competência(s):", 
+        all_competencias, 
+        default=all_competencias[:1] if all_competencias else None
+    )
+    
+    # 3. Filtragem do DataFrame
     df_painel = df_lancamentos[df_lancamentos["colaborador_email"] == target_email].copy()
     
-    if not df_painel.empty and sel_comps:
-        df_painel = df_painel[df_painel['competencia'].isin(sel_comps)]
+    if not df_painel.empty and comp_selecionadas:
+        df_painel = df_painel[df_painel['competencia'].isin(comp_selecionadas)]
     
-    if not df_painel.empty and sel_comps:
+    if not df_painel.empty and comp_selecionadas:
+        # Cálculos Financeiros
         df_painel['h_dec'] = df_painel['horas'].apply(convert_hhmm_to_decimal)
-        df_painel['val_total'] = df_painel['h_dec'] * df_painel['valor_hora_historico']
+        df_painel['valor_total'] = df_painel['h_dec'] * df_painel['valor_hora_historico']
         
+        # 4. Scorecards (KPIs)
+        st.markdown("### Resumo Financeiro do Período")
         k1, k2, k3, k4 = st.columns(4)
-        h_p = df_painel[df_painel['status_aprovaca'] == 'Pendente']['horas'].sum()
-        h_a = df_painel[df_painel['status_aprovaca'] == 'Aprovado']['horas'].sum()
-        h_pg = df_painel[df_painel['status_pagamento'] == 'Pago']['horas'].sum()
-        vt = df_painel['val_total'].sum()
         
-        k1.metric("Pendente", f"{h_p:.2f}h")
-        k2.metric("Aprovado", f"{h_a:.2f}h")
-        k3.metric("Pago", f"{h_pg:.2f}h")
-        k4.metric("Valor Total", f"R$ {vt:,.2f}")
+        h_pend = df_painel[df_painel['status_aprovaca'] == 'Pendente']['horas'].sum()
+        h_aprov = df_painel[df_painel['status_aprovaca'] == 'Aprovado']['horas'].sum()
+        h_pago = df_painel[df_painel['status_pagamento'] == 'Pago']['horas'].sum()
+        val_total_periodo = df_painel['valor_total'].sum()
+        
+        k1.metric("Pendente (HH.MM)", f"{h_pend:.2f}", delta="Aguardando", delta_color="off")
+        k2.metric("Aprovado (HH.MM)", f"{h_aprov:.2f}", delta="Validado", delta_color="normal")
+        k3.metric("Pago (HH.MM)", f"{h_pago:.2f}", delta="Liquidado", delta_color="normal")
+        k4.metric("Valor Total Estimado", f"R$ {val_total_periodo:,.2f}")
         
         st.divider()
+        st.markdown(f"### 📋 Detalhamento ({len(df_painel)} registros)")
+        
+        # Tabela Detalhada
+        df_view = df_painel[[
+            'descricao', 'Data Real', 'projeto', 'horas', 'valor_total', 
+            'status_aprovaca', 'status_pagamento', 'competencia'
+        ]].sort_values(by='Data Real', ascending=False)
+        
         st.dataframe(
-            df_painel[['descricao', 'Data Real', 'competencia', 'projeto', 'horas', 'val_total', 'status_aprovaca', 'status_pagamento']],
-            use_container_width=True, hide_index=True,
+            df_view, 
+            use_container_width=True, 
+            hide_index=True,
             column_config={
-                "val_total": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+                "valor_total": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                "horas": st.column_config.NumberColumn("Horas (HH.MM)", format="%.2f"),
+                "Data Real": st.column_config.DateColumn("Data Atividade", format="DD/MM/YYYY"),
+                "status_aprovaca": st.column_config.TextColumn("Status"),
+                "status_pagamento": st.column_config.TextColumn("Pagamento"),
+                "descricao": st.column_config.TextColumn("Descrição", width="large"),
+                "projeto": st.column_config.TextColumn("Projeto"),
+                "competencia": st.column_config.TextColumn("Comp.")
             }
         )
     else:
-        st.warning("Selecione uma competência.")
+        if not comp_selecionadas:
+            st.warning("👆 Selecione pelo menos uma competência (Mês/Ano) acima para ver os dados.")
+        else:
+            st.info("Nenhum registro encontrado para as competências selecionadas.")
 
 # ==============================================================================
-# ABA 4: ADMIN APROVAÇÕES
+# ABA 4: ADMIN APROVAÇÕES (AQUI ESTÁ O CORAÇÃO DO SISTEMA)
 # ==============================================================================
 elif selected_tab == "🛡️ Admin Aprovações":
     st.subheader("🛡️ Central de Gestão Operacional")
     
-    # --- BULK IMPORT ---
+    # --- BLOCO A: IMPORTAÇÃO EM MASSA ---
     with st.expander("📥 Importação em Massa (Excel)", expanded=False):
-        cola = st.text_area("Data | Projeto | Email | Horas | Tipo | Desc", height=100)
-        if cola and st.button("Gravar Massa"):
+        st.info("O sistema identificará a data correta (DD/MM/AAAA) e criará a competência.")
+        cola_texto = st.text_area("Data | Projeto | Email | Horas | Tipo | Descrição", height=100)
+        
+        if cola_texto and st.button("🚀 Processar Importação", type="primary"):
             try:
-                df_p = pd.read_csv(io.StringIO(cola), sep='\t', names=["data", "p", "e", "h", "t", "d"])
+                df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "h", "t", "d"])
+                
                 with conn.session as s:
                     for r in df_p.itertuples():
-                        v = auth_db.get(r.e, {}).get("valor_hora", 0)
-                        try:
-                            dt = pd.to_datetime(r.data, dayfirst=True)
-                            c_s, d_s = dt.strftime("%Y-%m"), dt.strftime("%Y-%m-%d")
-                        except:
-                            now = datetime.now()
-                            c_s, d_s = now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
+                        # Busca valor hora do usuário
+                        v_h = auth_db.get(r.e, {}).get("valor_hora", 0)
                         
+                        # Tratamento Data Duplo
+                        try:
+                            dt_obj = pd.to_datetime(r.data, dayfirst=True)
+                            comp_str = dt_obj.strftime("%Y-%m")
+                            data_full = dt_obj.strftime("%Y-%m-%d")
+                        except:
+                            # Fallback para hoje
+                            now = datetime.now()
+                            comp_str = now.strftime("%Y-%m")
+                            data_full = now.strftime("%Y-%m-%d")
+
                         s.execute(
-                            text("INSERT INTO lancamentos (id, colaborador_email, projeto, horas, competencia, data_atividade, tipo, descricao, valor_hora_historico, status_aprovaca, foi_editado) VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, 'Pendente', FALSE)"),
-                            {"id": str(uuid.uuid4()), "e": r.e, "p": r.p, "h": r.h, "c": c_s, "d_atv": d_s, "t": r.t, "d": r.d, "v": v}
+                            text("""
+                                INSERT INTO lancamentos 
+                                (id, colaborador_email, projeto, horas, competencia, data_atividade, tipo, descricao, valor_hora_historico, status_aprovaca, foi_editado) 
+                                VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, 'Pendente', FALSE)
+                            """),
+                            {
+                                "id": str(uuid.uuid4()), "e": r.e, "p": r.p, "h": r.h, 
+                                "c": comp_str, "d_atv": data_full, 
+                                "t": r.t, "d": r.d, "v": v_h
+                            }
                         )
                     s.commit()
-                st.success("Importado!"); time.sleep(1); st.rerun()
-            except Exception as e: st.error(f"Erro: {e}")
+                st.success(f"{len(df_p)} registros importados!"); time.sleep(1); st.rerun()
+            except Exception as e: 
+                st.error("Erro na leitura. Verifique as colunas."); st.code(str(e))
 
     st.divider()
     
-    # --- PENDENTES ---
+    # --- BLOCO B: PENDENTES (COM ALERTA DE EDIÇÃO) ---
     st.markdown("### 🕒 Fila de Pendentes")
     
     c_chk, c_fil = st.columns([1, 3])
     sel_all = c_chk.checkbox("Selecionar Todos")
-    lista_f = ["Todos"] + lista_colaboradores_visual
-    f_p = c_fil.selectbox("Filtrar:", lista_f, key="fp_adm")
+    
+    lista_filtro_pend = ["Todos"] + lista_colaboradores_visual
+    f_p = c_fil.selectbox("Filtrar Pendentes:", lista_filtro_pend, key="fp_adm")
     
     df_p = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Pendente'].copy()
     if f_p != "Todos":
@@ -592,28 +797,35 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_p = df_p[df_p['colaborador_email'] == e_p]
         
     if not df_p.empty:
+        # Colunas com Flag 'foi_editado'
         df_p = df_p[['foi_editado', 'descricao', 'Nome', 'projeto', 'Data Real', 'horas', 'id']]
         df_p.insert(0, "✅", sel_all)
         df_p.insert(1, "🗑️", False)
         
         ed_p = st.data_editor(
-            df_p, use_container_width=True, hide_index=True, key="adm_pend",
+            df_p, 
+            use_container_width=True, 
+            hide_index=True, 
+            key="adm_pend",
             column_config={
                 "✅": st.column_config.CheckboxColumn("Apv", width="small"),
                 "🗑️": st.column_config.CheckboxColumn("Rej", width="small"),
-                "foi_editado": st.column_config.CheckboxColumn("⚠️ Editado?", disabled=True, help="Usuário alterou este item."),
-                "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+                "foi_editado": st.column_config.CheckboxColumn("⚠️ Editado?", disabled=True, help="O usuário alterou este item recentemente!"),
+                "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                "horas": st.column_config.NumberColumn("HH.MM", format="%.2f")
             }
         )
         
         c1, c2 = st.columns(2)
-        if c1.button("Aprovar Selecionados"):
+        if c1.button("Aprovar Selecionados", type="primary"):
             ids = ed_p[ed_p["✅"] == True]["id"].tolist()
             if ids:
                 with conn.session as s:
+                    # Aprova e reseta a flag de edição
                     s.execute(text("UPDATE lancamentos SET status_aprovaca='Aprovado', foi_editado=FALSE WHERE id IN :ids"), {"ids": tuple(ids)})
                     s.commit()
                 st.toast("Aprovado!"); time.sleep(0.5); st.rerun()
+                
         if c2.button("Rejeitar Selecionados"):
             ids = ed_p[ed_p["🗑️"] == True]["id"].tolist()
             if ids:
@@ -626,9 +838,11 @@ elif selected_tab == "🛡️ Admin Aprovações":
 
     st.divider()
     
-    # --- APROVADOS (SYNC DATA) ---
-    st.markdown("### ✅ Histórico de Aprovados")
-    f_a = st.selectbox("Filtrar Aprovados:", lista_f, key="fa_adm")
+    # --- BLOCO C: APROVADOS (EDIÇÃO TOTAL + SYNC DATA/COMPETENCIA) ---
+    st.markdown("### ✅ Histórico de Aprovados (Edição)")
+    st.caption("Ajuste datas, projetos e competências aqui se necessário. A competência é calculada automaticamente.")
+    
+    f_a = st.selectbox("Filtrar Aprovados:", lista_filtro_pend, key="fa_adm")
     
     df_a = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
     if f_a != "Todos":
@@ -636,168 +850,281 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_a = df_a[df_a['colaborador_email'] == e_a]
         
     if not df_a.empty:
+        # Exibe colunas cruciais
         df_a = df_a[['descricao', 'Nome', 'projeto', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
         
         ed_a = st.data_editor(
-            df_a, use_container_width=True, hide_index=True, key="adm_aprov",
+            df_a, 
+            use_container_width=True, 
+            hide_index=True, 
+            key="adm_aprov",
             column_config={
                 "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Aprovado", "Pendente", "Negado"], required=True),
                 "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
-                "competencia": st.column_config.TextColumn("Comp. (Auto)")
+                "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True) # Bloqueado para edição direta
             }
         )
-        if st.button("Salvar Edições"):
-            count = 0
+        
+        if st.button("Salvar Alterações em Aprovados"):
+            count_updates = 0
             with conn.session as s:
                 for r in ed_a.itertuples():
                     try:
-                        # Sync Data -> Competencia
-                        d_val = getattr(r, "Data_Real")
-                        if isinstance(d_val, str): d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
-                        elif isinstance(d_val, pd.Timestamp): d_obj = d_val.date()
-                        else: d_obj = d_val
+                        # LÓGICA DE SINCRONIA: Data -> Competência
+                        # Pega a data editada do objeto Data Real
+                        # O Pandas no itertuples substitui espaço por _
+                        d_val = getattr(r, "Data_Real") 
                         
-                        c_s, d_s = d_obj.strftime("%Y-%m"), d_obj.strftime("%Y-%m-%d")
+                        # Converte para objeto date Python
+                        if isinstance(d_val, str): 
+                            d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
+                        elif isinstance(d_val, pd.Timestamp): 
+                            d_obj = d_val.date()
+                        else:
+                            d_obj = d_val 
                         
+                        # Recalcula strings para o banco
+                        c_s = d_obj.strftime("%Y-%m")
+                        d_s = d_obj.strftime("%Y-%m-%d")
+                        
+                        # Update completo
                         s.execute(
-                            text("UPDATE lancamentos SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, competencia=:c, data_atividade=:da WHERE id=:id"),
+                            text("""
+                                UPDATE lancamentos 
+                                SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, competencia=:c, data_atividade=:da 
+                                WHERE id=:id
+                            """),
                             {"s": r.status_aprovaca, "h": r.horas, "d": r.descricao, "p": r.projeto, "c": c_s, "da": d_s, "id": r.id}
                         )
-                        count += 1
-                    except: pass
+                        count_updates += 1
+                    except Exception as e:
+                        st.error(f"Erro ao atualizar linha ID {r.id}: {e}")
                 s.commit()
-            st.success(f"{count} atualizados!"); time.sleep(1); st.rerun()
+            
+            if count_updates > 0:
+                st.success(f"{count_updates} registros atualizados e sincronizados!"); time.sleep(1); st.rerun()
+    else:
+        st.info("Nenhum item aprovado para este filtro.")
 
-    # --- REJEITADOS ---
+    # --- BLOCO D: REJEITADOS ---
     st.divider()
-    with st.expander("❌ Lixeira / Rejeitados"):
+    with st.expander("❌ Visualizar Lixeira / Rejeitados"):
         df_n = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Negado'].copy()
         if not df_n.empty:
             df_n = df_n[['descricao', 'Nome', 'Data Real', 'status_aprovaca', 'id']]
-            ed_n = st.data_editor(df_n, use_container_width=True, hide_index=True, column_config={"status_aprovaca": st.column_config.SelectboxColumn("Ação", options=["Negado", "Pendente"])})
-            if st.button("Recuperar"):
+            ed_n = st.data_editor(
+                df_n, 
+                use_container_width=True, 
+                hide_index=True, 
+                column_config={"status_aprovaca": st.column_config.SelectboxColumn("Ação", options=["Negado", "Pendente"])}
+            )
+            
+            c_rec, c_del = st.columns(2)
+            if c_rec.button("💾 Recuperar"):
                 with conn.session as s:
                     for r in ed_n.itertuples():
                         if r.status_aprovaca != "Negado":
                             s.execute(text("UPDATE lancamentos SET status_aprovaca=:s WHERE id=:id"), {"s": r.status_aprovaca, "id": r.id})
                     s.commit()
-                st.rerun()
+                st.success("Recuperado!"); st.rerun()
+                
+            if c_del.button("🔥 EXCLUIR DEFINITIVAMENTE", type="primary"):
+                with conn.session as s:
+                    ids_del = tuple(ed_n[ed_n['status_aprovaca'] == 'Negado']['id'].tolist())
+                    if ids_del:
+                        s.execute(text("DELETE FROM lancamentos WHERE id IN :ids"), {"ids": ids_del})
+                        s.commit()
+                st.warning("Excluído!"); st.rerun()
+        else:
+            st.info("Lixeira vazia.")
 
 # ==============================================================================
-# ABA 5: PAGAMENTOS
+# ABA 5: PAGAMENTOS (DRILL-DOWN)
 # ==============================================================================
 elif selected_tab == "💸 Pagamentos":
     st.subheader("💸 Consolidação Financeira")
     
     df_pay = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
+    
     if not df_pay.empty:
+        # Conversão Financeira
         df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
         df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
         
+        # Agrupa por Competência e Colaborador
         df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({'r$': 'sum', 'horas': 'sum'}).reset_index()
         df_g = df_g.sort_values(['competencia'], ascending=False)
         
+        # Totalizador
         tot = df_pay[df_pay['status_pagamento'] != 'Pago']['r$'].sum()
-        st.metric("Total Pendente", f"R$ {tot:,.2f}")
+        st.metric("Total Pendente Geral", f"R$ {tot:,.2f}")
         
+        # Drill-down
         for idx, row in df_g.iterrows():
             nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
+            
             with st.expander(f"📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
+                
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
                 
-                st.dataframe(det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']], use_container_width=True, hide_index=True,
-                             column_config={"r$": st.column_config.NumberColumn("Valor", format="R$ %.2f")})
+                st.dataframe(
+                    det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']],
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "r$": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                        "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+                    }
+                )
                 
-                s_at = det['status_pagamento'].iloc[0]
+                # Controle de Status do Grupo
+                s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns else "Em aberto"
                 ops = ["Em aberto", "Pago", "Parcial"]
                 ix = ops.index(s_at) if s_at in ops else 0
                 
                 c1, c2 = st.columns([3, 1])
                 ns = c1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
-                if c2.button("Atualizar", key=f"b_{idx}"):
+                
+                if c2.button("Atualizar Pagamento", key=f"b_{idx}"):
                     with conn.session as s:
-                        ids = tuple(det['id'].tolist())
-                        s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids})
+                        ids_u = tuple(det['id'].tolist())
+                        s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
                         s.commit()
                     st.toast("Pago!"); time.sleep(0.5); st.rerun()
-    else: st.info("Vazio.")
+    else:
+        st.info("Nenhum lançamento aprovado.")
 
 # ==============================================================================
-# ABA 6: BI
+# ABA 6: BI ESTRATÉGICO
 # ==============================================================================
 elif selected_tab == "📈 BI Estratégico":
-    st.subheader("📈 BI Humana")
+    st.subheader("📈 Inteligência de Negócios")
     
+    # Filtro
     comps = sorted(df_lancamentos['competencia'].astype(str).unique(), reverse=True) if not df_lancamentos.empty else []
-    sel_bi = st.multiselect("Competências:", comps, default=comps[:2] if comps else None)
+    sel_bi = st.multiselect("Filtrar Competências:", comps, default=comps[:2] if comps else None)
     
     df_bi = df_lancamentos.copy()
     if sel_bi and not df_bi.empty:
+        # Filtra
         df_bi = df_bi[df_bi['competencia'].isin(sel_bi)]
+        
+        # Processa
         df_bi['tipo_norm'] = df_bi['tipo'].apply(normalize_text_fields)
         df_bi['h_dec'] = df_bi['horas'].apply(convert_hhmm_to_decimal)
         df_bi["custo"] = df_bi['h_dec'] * df_bi["valor_hora_historico"]
         
+        # Cards
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Horas", f"{df_bi['horas'].sum():.2f}")
-        m2.metric("Custo", f"R$ {df_bi['custo'].sum():,.2f}")
+        m1.metric("Horas Totais", f"{df_bi['horas'].sum():.2f}")
+        m2.metric("Custo Total", f"R$ {df_bi['custo'].sum():,.2f}")
         m3.metric("Pago", f"R$ {df_bi[df_bi['status_pagamento']=='Pago']['custo'].sum():,.2f}")
         m4.metric("Registros", len(df_bi))
         
+        # Gráficos
         c1, c2 = st.columns(2)
-        with c1: st.bar_chart(df_bi.groupby("projeto")["custo"].sum())
-        with c2: st.bar_chart(df_bi.groupby("tipo_norm")["horas"].sum())
+        with c1: 
+            st.write("**💰 Custo por Projeto**")
+            st.bar_chart(df_bi.groupby("projeto")["custo"].sum())
+        with c2: 
+            st.write("**⏱️ Horas por Tipo de Atividade**")
+            st.bar_chart(df_bi.groupby("tipo_norm")["horas"].sum())
         
-        st.write("**Ranking (Por Nome)**")
-        r = df_bi.groupby("Nome").agg({'horas': 'sum', 'custo': 'sum'}).sort_values('horas', ascending=False)
-        st.dataframe(r, use_container_width=True, column_config={"custo": st.column_config.NumberColumn("R$", format="%.2f")})
-    else: st.info("Selecione competência.")
+        st.divider()
+        st.write("**🏆 Ranking de Colaboradores (Por Nome)**")
+        # Agrupa pelo Nome
+        rank = df_bi.groupby("Nome").agg({'horas': 'sum', 'custo': 'sum'}).sort_values('horas', ascending=False)
+        st.dataframe(rank, use_container_width=True, column_config={"custo": st.column_config.NumberColumn("R$", format="%.2f")})
+    else:
+        st.info("Selecione uma competência para visualizar os gráficos.")
 
 # ==============================================================================
-# ABA 7: CONFIGURAÇÕES
+# ABA 7: CONFIGURAÇÕES (ADMINISTRAÇÃO)
 # ==============================================================================
 elif selected_tab == "⚙️ Configurações":
-    st.subheader("⚙️ Configurações")
+    st.subheader("⚙️ Configurações do Sistema")
     
-    st.write("👥 **Usuários**")
-    # TYPE=PASSWORD REMOVIDO PARA EVITAR ERRO DO STREAMLIT NOVO
+    st.write("👥 **Gestão de Usuários (Defina o Nome de Exibição)**")
+    
+    # TYPE='PASSWORD' FOI REMOVIDO PARA EVITAR ERROS EM VERSÕES NOVAS DO STREAMLIT
     ed_u = st.data_editor(
-        df_u_login, num_rows="dynamic", hide_index=True, 
+        df_u_login, 
+        num_rows="dynamic", 
+        hide_index=True, 
         column_config={
-            "email": st.column_config.TextColumn("Login", disabled=True),
-            "nome": st.column_config.TextColumn("Nome Exibição"),
+            "email": st.column_config.TextColumn("Login (Email)", disabled=True),
+            "nome": st.column_config.TextColumn("Nome de Exibição"),
             "senha": st.column_config.TextColumn("Senha (Texto)"),
             "is_admin": st.column_config.CheckboxColumn("Admin"),
-            "valor_hora": st.column_config.NumberColumn("Valor")
+            "valor_hora": st.column_config.NumberColumn("Valor Hora")
         }
     )
     if st.button("Salvar Usuários"):
         with conn.session as s:
             for r in ed_u.itertuples():
+                # Garante nome
                 nm = getattr(r, 'nome', r.email.split('@')[0])
-                s.execute(text("INSERT INTO usuarios (email, valor_hora, senha, is_admin, nome) VALUES (:e, :v, :s, :a, :n) ON CONFLICT (email) DO UPDATE SET valor_hora=:v, senha=:s, is_admin=:a, nome=:n"), 
-                          {"e": r.email, "v": r.valor_hora, "s": str(r.senha), "a": bool(r.is_admin), "n": nm})
+                if pd.isna(nm) or str(nm).strip() == "": nm = r.email.split('@')[0]
+                
+                # Upsert
+                s.execute(
+                    text("""
+                        INSERT INTO usuarios (email, valor_hora, senha, is_admin, nome) 
+                        VALUES (:e, :v, :s, :a, :n) 
+                        ON CONFLICT (email) 
+                        DO UPDATE SET valor_hora=:v, senha=:s, is_admin=:a, nome=:n
+                    """), 
+                    {"e": r.email, "v": r.valor_hora, "s": str(r.senha), "a": bool(r.is_admin), "n": nm}
+                )
             s.commit()
         st.success("Salvo!"); st.rerun()
         
-    st.divider(); st.write("📁 **Projetos**")
+    st.divider()
+    
+    st.write("📁 **Gestão de Projetos**")
     ed_p = st.data_editor(df_projetos, num_rows="dynamic", hide_index=True)
     if st.button("Salvar Projetos"):
         with conn.session as s:
             for r in ed_p.itertuples():
-                if r.nome: s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": r.nome})
+                if r.nome: 
+                    s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": r.nome})
             s.commit()
         st.success("Salvo!"); st.rerun()
 
-    st.divider(); st.write("🏦 **Bancos**")
-    ed_b = st.data_editor(df_bancos, num_rows="dynamic", hide_index=True, column_config={"tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email"])})
+    st.divider()
+    
+    st.write("🏦 **Dados Bancários**")
+    ed_b = st.data_editor(
+        df_banc, 
+        num_rows="dynamic", 
+        hide_index=True, 
+        column_config={
+            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"])
+        }
+    )
     if st.button("Salvar Bancos"):
         with conn.session as s:
             for r in ed_b.itertuples():
-                s.execute(text("INSERT INTO dados_bancarios (colaborador_email, banco, tipo_chave, chave_pix) VALUES (:e, :b, :t, :c) ON CONFLICT (colaborador_email) DO UPDATE SET banco=:b, tipo_chave=:t, chave_pix=:c"), 
-                          {"e": r.colaborador_email, "b": r.banco, "t": getattr(r, 'tipo_chave', 'CPF'), "c": r.chave_pix})
+                tk = getattr(r, 'tipo_chave', 'CPF')
+                s.execute(
+                    text("""
+                        INSERT INTO dados_bancarios (colaborador_email, banco, tipo_chave, chave_pix) 
+                        VALUES (:e, :b, :t, :c) 
+                        ON CONFLICT (colaborador_email) 
+                        DO UPDATE SET banco=:b, tipo_chave=:t, chave_pix=:c
+                    """), 
+                    {"e": r.colaborador_email, "b": r.banco, "t": tk, "c": r.chave_pix}
+                )
             s.commit()
         st.success("Salvo!"); st.rerun()
 
+# ==============================================================================
+# RODAPÉ
+# ==============================================================================
 st.markdown("---")
-st.markdown("<p style='text-align: center; color: gray;'>OnCall Humana | v12.0 Final Stable</p>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align: center; color: gray; font-size: 12px;'>"
+    "OnCall Humana - Developed by Pedro Reis | v12.1 Infinity Stable | "
+    f"Status: Online | {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    "</p>", 
+    unsafe_allow_html=True
+)
