@@ -1078,9 +1078,22 @@ elif selected_tab == "💸 Pagamentos":
         for idx, row in df_g.iterrows():
             nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
             
-            with st.expander(f"📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
-                
-                det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
+            # 1. Filtra os detalhes PRIMEIRO para descobrir o status do grupo
+            det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
+            s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns and not det.empty else "Em aberto"
+            
+            # 2. Define a label colorida baseada no status
+            if s_at == "Pago":
+                badge = "🟢 PAGO"
+            elif s_at == "Liberado para pagamento":
+                badge = "🔵 LIBERADO"
+            elif s_at == "Parcial":
+                badge = "🟡 PARCIAL"
+            else:
+                badge = "🔴 EM ABERTO"
+            
+            # 3. Adiciona a badge visual direto no título do Drill-Down
+            with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
                 
                 st.dataframe(
                     det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']],
@@ -1092,8 +1105,7 @@ elif selected_tab == "💸 Pagamentos":
                     }
                 )
                 
-                s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns else "Em aberto"
-                ops = ["Em aberto", "Pago", "Parcial"]
+                ops = ["Em aberto", "Liberado para pagamento", "Parcial", "Pago"]
                 ix = ops.index(s_at) if s_at in ops else 0
                 
                 c1, c2 = st.columns([3, 1])
@@ -1104,7 +1116,7 @@ elif selected_tab == "💸 Pagamentos":
                         ids_u = tuple(det['id'].tolist())
                         s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
                         s.commit()
-                    st.toast("Pago!")
+                    st.toast("Status atualizado!")
                     time.sleep(0.5)
                     st.rerun()
     else:
