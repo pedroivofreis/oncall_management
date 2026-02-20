@@ -72,72 +72,32 @@ st.set_page_config(
 # ==============================================================================
 st.markdown("""
 <style>
-    /* Ajuste do container principal para maximizar a área útil */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 5rem;
-        max-width: 98% !important;
-    }
+    /* ... (Mantenha as regras anteriores e adicione estas abaixo) ... */
 
-    /* Estilo dos Cards de Métricas (KPIs) */
-    div[data-testid="stMetric"] {
-        background-color: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(128, 128, 128, 0.2);
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        transition: transform 0.2s ease-in-out;
-    }
-    div[data-testid="stMetric"]:hover {
-        border-color: #0f54c9;
-        transform: translateY(-2px);
-    }
-
-    /* Labels de formulários mais legíveis e fortes */
-    label {
-        font-weight: 700 !important;
-        font-size: 0.95rem !important;
-        color: inherit;
-        letter-spacing: 0.02em;
-    }
-
-    /* Cabeçalhos de Expander mais destacados (Azul Corporativo) */
-    .streamlit-expanderHeader {
-        font-weight: 700;
-        font-size: 1.05rem;
-        color: #0f54c9;
-        background-color: rgba(128, 128, 128, 0.05);
-        border-radius: 5px;
-        padding: 10px;
-    }
-
-    /* Tabelas (Dataframes) com bordas definidas */
-    div[data-testid="stDataFrame"] {
-        border: 1px solid rgba(128, 128, 128, 0.15);
-        border-radius: 5px;
-        padding: 2px;
-    }
-
-    /* Botões Primários (Gradiente Azul) */
-    button[kind="primary"] {
-        font-weight: bold;
-        border: 1px solid rgba(255, 75, 75, 0.5);
-        background: linear-gradient(90deg, #0f54c9 0%, #0a3a8b 100%);
+    /* Botão de Destaque para o BI Estratégico */
+    div.stButton > button:first-child {
+        background-color: #0f54c9;
         color: white;
-    }
-    
-    /* Alerta de Edição (Texto Vermelho) */
-    .edited-alert {
-        color: #ff4b4b;
-        font-weight: bold;
-        font-size: 0.8rem;
-    }
-    
-    /* Toast Notifications */
-    div[data-testid="stToast"] {
-        padding: 1rem;
         border-radius: 8px;
-        font-weight: 500;
+        height: 3em;
+        width: 100%;
+        font-weight: bold;
+        border: none;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+    }
+    
+    /* Estilização do Divisor da Área Admin */
+    .admin-divider {
+        margin: 1.5rem 0 0.5rem 0;
+        padding: 5px;
+        background-color: rgba(15, 84, 201, 0.1);
+        border-left: 5px solid #0f54c9;
+        font-weight: bold;
+        color: #0f54c9;
+        font-size: 0.8rem;
+        letter-spacing: 1px;
+        text-transform: uppercase;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -364,29 +324,35 @@ else:
 # 7. MENU DE NAVEGAÇÃO E ESTADO DA SESSÃO
 # ==============================================================================
 st.sidebar.divider()
-st.sidebar.subheader("📍 Menu Principal")
 
+# --- BOTÃO DE ELITE: BI ESTRATÉGICO ---
+# Se for Admin, ele ganha o botão de destaque no topo
 if is_admin_session:
-    app_menu_options = [
-        "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal",
-        "🧾 Notas Fiscais",
-        "➖➖ 🔐 ÁREA ADMIN ➖➖", # <-- Separador Visual Adicionado
-        "📊 Gestão de Painéis", 
-        "🛡️ Admin Aprovações",
-        "💸 Pagamentos", 
-        "📈 BI Estratégico", 
-        "⚙️ Configurações"
-    ]
-else:
-    app_menu_options = [
-        "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal",
-        "📊 Meu Painel",
-        "🧾 Notas Fiscais"
-    ]
+    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO"):
+        st.session_state.selected_tab = "📈 BI Estratégico"
+        st.rerun()
 
-selected_tab = st.sidebar.radio("Ir para:", app_menu_options)
+st.sidebar.subheader("📍 Operacional")
+
+# Opções básicas (comuns ou iniciais)
+base_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "🧾 Notas Fiscais"]
+if not is_admin_session:
+    base_options.append("📊 Meu Painel")
+
+# Se for Admin, adicionamos os módulos de gestão com um separador visual
+if is_admin_session:
+    st.sidebar.markdown('<div class="admin-divider">⚙️ Gestão & Auditoria</div>', unsafe_allow_html=True)
+    admin_options = ["📊 Gestão de Painéis", "🛡️ Admin Aprovações", "💸 Pagamentos", "⚙️ Configurações"]
+    all_options = base_options + admin_options
+else:
+    all_options = base_options
+
+# Controle de estado para o clique no botão de BI não se perder
+if 'selected_tab' not in st.session_state:
+    st.session_state.selected_tab = "📝 Lançamentos"
+
+selected_tab = st.sidebar.radio("Ir para:", all_options, index=all_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in all_options else 0)
+st.session_state.selected_tab = selected_tab
 
 # Lógica para não quebrar a tela se o admin clicar no separador sem querer
 if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
