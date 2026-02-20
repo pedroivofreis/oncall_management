@@ -368,20 +368,20 @@ else:
 # ==============================================================================
 st.sidebar.divider()
 
-# Inicia o estado da aba caso não exista
+# Inicializa o estado da aba se não existir
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
 # --- BOTÃO DE ELITE: BI ESTRATÉGICO (SOMENTE ADMIN) ---
-# Ele agora é o único ponto de acesso para o BI, limpando o menu de baixo
 if is_admin_session:
-    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True):
+    # Se clicar no botão, forçamos a aba de BI e damos um rerun
+    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True, type="primary"):
         st.session_state.selected_tab = "📈 BI Estratégico"
         st.rerun()
 
 st.sidebar.subheader("📍 Menu Principal")
 
-# Define as opções baseadas no nível de acesso
+# Define as opções do menu rádio (sem o BI aqui para não duplicar)
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", 
@@ -391,7 +391,6 @@ if is_admin_session:
         "📊 Gestão de Painéis", 
         "🛡️ Admin Aprovações", 
         "💸 Pagamentos", 
-        # "📈 BI Estratégico", <-- REMOVIDO DAQUI PARA NÃO DUPLICAR
         "⚙️ Configurações"
     ]
 else:
@@ -402,26 +401,27 @@ else:
         "🧾 Notas Fiscais"
     ]
 
-# O rádio sincroniza com o st.session_state
-# Se a aba atual for o BI (vinda do botão), o rádio não seleciona nada ou mantém a anterior
-idx_tab = 0
-if st.session_state.selected_tab in app_menu_options:
-    idx_tab = app_menu_options.index(st.session_state.selected_tab)
-else:
-    # Se estiver no BI Estratégico, o rádio não precisa marcar uma opção da lista
-    # Usamos um truque: se não está na lista, o rádio mantém o índice 0 mas não atualiza a sessão
-    pass
+# Lógica de sincronia: Se a aba atual for o BI, o rádio não deve "puxar" para outra aba
+try:
+    if st.session_state.selected_tab == "📈 BI Estratégico":
+        # Se estamos no BI, o rádio fica na primeira opção mas não dispara mudança
+        idx_tab = 0 
+    else:
+        idx_tab = app_menu_options.index(st.session_state.selected_tab)
+except (ValueError, IndexError):
+    idx_tab = 0
 
-selected_tab = st.sidebar.radio(
+selected_radio = st.sidebar.radio(
     "Ir para:", 
     app_menu_options, 
     index=idx_tab,
     key="main_radio_menu"
 )
 
-# Só atualiza a sessão se o usuário clicar no rádio (para não sobrescrever o clique do botão de BI)
-if selected_tab != st.session_state.selected_tab and selected_tab in app_menu_options:
-    st.session_state.selected_tab = selected_tab
+# Só altera o estado se o usuário clicar no rádio e não estivermos vindo do botão de BI
+if selected_radio != st.session_state.selected_tab:
+    # Se o usuário clicar em qualquer opção do rádio, ele sai do modo BI
+    st.session_state.selected_tab = selected_radio
 
 # Trava visual para o separador
 if st.session_state.selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
