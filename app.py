@@ -349,10 +349,11 @@ st.sidebar.subheader("📍 Menu Principal")
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal", 
+        "🗂️ Histórico Pessoal",
+        "🧾 Notas Fiscais",
+        "➖➖ 🔐 ÁREA ADMIN ➖➖", # <-- Separador Visual Adicionado
         "📊 Gestão de Painéis", 
         "🛡️ Admin Aprovações",
-        "🧾 Notas Fiscais",
         "💸 Pagamentos", 
         "📈 BI Estratégico", 
         "⚙️ Configurações"
@@ -366,6 +367,13 @@ else:
     ]
 
 selected_tab = st.sidebar.radio("Ir para:", app_menu_options)
+
+# Lógica para não quebrar a tela se o admin clicar no separador sem querer
+if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
+    st.sidebar.info("👆 Escolha uma das opções abaixo.")
+    st.title("🔐 Área Administrativa")
+    st.info("Selecione um dos módulos de gestão no menu lateral para continuar.")
+    st.stop()
 
 # ==============================================================================
 # 8. PREPARAÇÃO DE DADOS GLOBAL (GLOBAL DATA FETCHING)
