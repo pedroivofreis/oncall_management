@@ -325,36 +325,55 @@ else:
 # ==============================================================================
 st.sidebar.divider()
 
-# --- BOTÃO DE ELITE: BI ESTRATÉGICO ---
-# Se for Admin, ele ganha o botão de destaque no topo
-if is_admin_session:
-    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO"):
-        st.session_state.selected_tab = "📈 BI Estratégico"
-        st.rerun()
-
-st.sidebar.subheader("📍 Operacional")
-
-# Opções básicas (comuns ou iniciais)
-base_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "🧾 Notas Fiscais"]
-if not is_admin_session:
-    base_options.append("📊 Meu Painel")
-
-# Se for Admin, adicionamos os módulos de gestão com um separador visual
-if is_admin_session:
-    st.sidebar.markdown('<div class="admin-divider">⚙️ Gestão & Auditoria</div>', unsafe_allow_html=True)
-    admin_options = ["📊 Gestão de Painéis", "🛡️ Admin Aprovações", "💸 Pagamentos", "⚙️ Configurações"]
-    all_options = base_options + admin_options
-else:
-    all_options = base_options
-
-# Controle de estado para o clique no botão de BI não se perder
+# Inicia o estado da aba caso não exista
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
-selected_tab = st.sidebar.radio("Ir para:", all_options, index=all_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in all_options else 0)
+# --- BOTÃO DE ELITE: BI ESTRATÉGICO (SOMENTE ADMIN) ---
+if is_admin_session:
+    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True):
+        st.session_state.selected_tab = "📈 BI Estratégico"
+        st.rerun()
+
+st.sidebar.subheader("📍 Menu Principal")
+
+# Define as opções baseadas no nível de acesso
+if is_admin_session:
+    app_menu_options = [
+        "📝 Lançamentos", 
+        "🗂️ Histórico Pessoal", 
+        "🧾 Notas Fiscais",
+        "➖➖ 🔐 ÁREA ADMIN ➖➖",
+        "📊 Gestão de Painéis", 
+        "🛡️ Admin Aprovações", 
+        "💸 Pagamentos", 
+        "📈 BI Estratégico", 
+        "⚙️ Configurações"
+    ]
+else:
+    app_menu_options = [
+        "📝 Lançamentos", 
+        "🗂️ Histórico Pessoal", 
+        "📊 Meu Painel", 
+        "🧾 Notas Fiscais"
+    ]
+
+# O rádio agora sincroniza com o st.session_state para permitir que o botão lá de cima funcione
+idx_tab = 0
+if st.session_state.selected_tab in app_menu_options:
+    idx_tab = app_menu_options.index(st.session_state.selected_tab)
+
+selected_tab = st.sidebar.radio(
+    "Ir para:", 
+    app_menu_options, 
+    index=idx_tab,
+    key="main_radio_menu"
+)
+
+# Sincroniza o estado global com a escolha do rádio
 st.session_state.selected_tab = selected_tab
 
-# Lógica para não quebrar a tela se o admin clicar no separador sem querer
+# Trava visual para o separador
 if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
     st.sidebar.info("👆 Escolha uma das opções abaixo.")
     st.title("🔐 Área Administrativa")
