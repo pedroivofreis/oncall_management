@@ -973,9 +973,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_a = df_a[df_a['colaborador_email'] == e_a]
         
     if not df_a.empty:
-        # Garante que as colunas necessárias existam
-        cols_view = ['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']
-        df_a = df_a[cols_view]
+        df_a = df_a[['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
         df_a.insert(0, "Excluir", False)
         
         ed_a = st.data_editor(
@@ -987,7 +985,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir", width="small"),
                 "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Aprovado", "Pendente", "Negado"], required=True),
                 "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
-                "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True),
                 "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
                 "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Custo Operacional", "Outros"], required=True)
             }
@@ -1006,13 +1003,22 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 # 2. Executa as Atualizações
                 for r in df_to_update.itertuples():
                     try:
-                        # BLINDAGEM: Acessa a coluna "Data Real" independente do nome que o itertuples der
-                        # O getattr busca pelo nome da coluna no DataFrame original
-                        d_val = getattr(r, 'Data_Real', getattr(r, '_6', None)) # _6 costuma ser a posição da Data
+                        # Tenta pegar a data de várias formas para não dar None
+                        d_val = getattr(r, 'Data_Real', None)
+                        if d_val is None:
+                            # Se falhar pelo nome, tenta pegar pela posição (Data Real costuma ser a 7ª coluna no itertuples aqui)
+                            d_val = r[7] 
                         
-                        if isinstance(d_val, str): d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
-                        elif isinstance(d_val, pd.Timestamp): d_obj = d_val.date()
-                        else: d_obj = d_val 
+                        # Se mesmo assim for nulo, pula a linha para não dar erro de strftime
+                        if pd.isna(d_val):
+                            continue
+                            
+                        if isinstance(d_val, str): 
+                            d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
+                        elif isinstance(d_val, pd.Timestamp): 
+                            d_obj = d_val.date()
+                        else: 
+                            d_obj = d_val 
                         
                         c_s = d_obj.strftime("%Y-%m")
                         d_s = d_obj.strftime("%Y-%m-%d")
@@ -1023,24 +1029,15 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                 SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, tipo=:t, competencia=:c, data_atividade=:da 
                                 WHERE id=:id
                             """),
-                            {
-                                "s": r.status_aprovaca, 
-                                "h": r.horas, 
-                                "d": r.descricao, 
-                                "p": r.projeto, 
-                                "t": r.tipo, 
-                                "c": c_s, 
-                                "da": d_s, 
-                                "id": r.id
-                            }
+                            {"s": r.status_aprovaca, "h": r.horas, "d": r.descricao, "p": r.projeto, "t": r.tipo, "c": c_s, "da": d_s, "id": r.id}
                         )
                         count_updates += 1
                     except Exception as e:
-                        st.error(f"Erro ao atualizar linha ID {r.id}: {e}")
+                        st.error(f"Erro no ID {r.id}: {e}")
                 s.commit()
             
-            st.success(f"Sucesso: {count_updates} atualizados e {len(ids_to_delete)} excluídos!")
-            time.sleep(1.5)
+            st.success(f"Processado: {count_updates} atualizados!")
+            time.sleep(1)
             st.rerun()
     else:
         st.info("Nenhum item aprovado para este filtro.")
