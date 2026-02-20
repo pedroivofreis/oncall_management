@@ -1255,25 +1255,38 @@ elif selected_tab == "⚙️ Configurações":
     # --- GESTÃO DE USUÁRIOS ---
     st.write("👥 **Gestão de Usuários**")
     
+    # Adiciona a coluna de exclusão no dataframe visual
+    df_u_edit = df_u_login.copy()
+    df_u_edit.insert(0, "Excluir", False)
+    
     ed_u = st.data_editor(
-        df_u_login, 
+        df_u_edit, 
         num_rows="dynamic", 
         hide_index=True, 
-        key="usuarios_editor_fix", # Chave de estado para não perder o foco
+        key="usuarios_editor_fix",
         column_config={
+            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small"),
             "email": st.column_config.TextColumn("Login (Email)", required=True),
             "nome": st.column_config.TextColumn("Nome de Exibição"),
             "senha": st.column_config.TextColumn("Senha (Texto)", required=True),
-            "is_admin": st.column_config.CheckboxColumn("Admin", default=False), # Evita erro de valor nulo
-            "valor_hora": st.column_config.NumberColumn("Valor Hora", default=0.0) # Evita erro de valor nulo
+            "is_admin": st.column_config.CheckboxColumn("Admin", default=False),
+            "valor_hora": st.column_config.NumberColumn("Valor Hora", default=0.0)
         }
     )
     
     if st.button("Salvar Usuários", type="primary"):
-        count_u = 0
+        ids_to_delete = ed_u[ed_u["Excluir"] == True]["email"].tolist()
+        df_to_update = ed_u[ed_u["Excluir"] == False]
+        count_u, count_del = 0, 0
+        
         with conn.session as s:
-            for r in ed_u.itertuples():
-                # Validação para ignorar linhas totalmente vazias criadas sem querer
+            # 1. Processa Exclusões
+            if ids_to_delete:
+                s.execute(text("DELETE FROM usuarios WHERE email IN :emails"), {"emails": tuple(ids_to_delete)})
+                count_del = len(ids_to_delete)
+                
+            # 2. Processa Inserções/Atualizações
+            for r in df_to_update.itertuples():
                 if pd.isna(r.email) or str(r.email).strip() == "":
                     continue
                     
@@ -1281,7 +1294,6 @@ elif selected_tab == "⚙️ Configurações":
                 if pd.isna(nm) or str(nm).strip() == "": 
                     nm = str(r.email).split('@')[0]
                 
-                # Tratamento de nulos para não quebrar o banco
                 v_hora = float(r.valor_hora) if pd.notna(r.valor_hora) else 0.0
                 senha_str = str(r.senha) if pd.notna(r.senha) else "123mudar"
                 is_adm = bool(r.is_admin) if pd.notna(r.is_admin) else False
@@ -1297,8 +1309,9 @@ elif selected_tab == "⚙️ Configurações":
                 )
                 count_u += 1
             s.commit()
-        st.success(f"{count_u} usuários atualizados com sucesso!")
-        time.sleep(1)
+            
+        st.success(f"Salvo! {count_u} atualizados/inseridos, {count_del} excluídos.")
+        time.sleep(1.5)
         st.rerun()
         
     st.divider()
@@ -1306,16 +1319,25 @@ elif selected_tab == "⚙️ Configurações":
     # --- GESTÃO DE PROJETOS ---
     st.write("📁 **Gestão de Projetos**")
     
+    df_p_edit = df_projetos.copy()
+    df_p_edit.insert(0, "Excluir", False)
+    
     ed_p = st.data_editor(
-        df_projetos, 
+        df_p_edit, 
         num_rows="dynamic", 
         hide_index=True,
-        key="projetos_editor_fix"
+        key="projetos_editor_fix",
+        column_config={"Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small")}
     )
     
     if st.button("Salvar Projetos"):
+        ids_del = ed_p[ed_p["Excluir"] == True]["nome"].tolist()
+        df_upd = ed_p[ed_p["Excluir"] == False]
+        
         with conn.session as s:
-            for r in ed_p.itertuples():
+            if ids_del:
+                s.execute(text("DELETE FROM projetos WHERE nome IN :ids"), {"ids": tuple(ids_del)})
+            for r in df_upd.itertuples():
                 if pd.notna(r.nome) and str(r.nome).strip() != "": 
                     s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": str(r.nome).strip()})
             s.commit()
@@ -1328,19 +1350,28 @@ elif selected_tab == "⚙️ Configurações":
     # --- DADOS BANCÁRIOS ---
     st.write("🏦 **Dados Bancários**")
     
+    df_b_edit = df_bancos.copy()
+    df_b_edit.insert(0, "Excluir", False)
+    
     ed_b = st.data_editor(
-        df_bancos, 
+        df_b_edit, 
         num_rows="dynamic", 
         hide_index=True,
         key="bancos_editor_fix",
         column_config={
-            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"], required=True)
+            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small"),
+            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"])
         }
     )
     
     if st.button("Salvar Bancos"):
+        ids_del = ed_b[ed_b["Excluir"] == True]["colaborador_email"].tolist()
+        df_upd = ed_b[ed_b["Excluir"] == False]
+        
         with conn.session as s:
-            for r in ed_b.itertuples():
+            if ids_del:
+                s.execute(text("DELETE FROM dados_bancarios WHERE colaborador_email IN :ids"), {"ids": tuple(ids_del)})
+            for r in df_upd.itertuples():
                 if pd.isna(r.colaborador_email) or str(r.colaborador_email).strip() == "":
                     continue
                     
@@ -1361,59 +1392,6 @@ elif selected_tab == "⚙️ Configurações":
         st.success("Dados bancários salvos com sucesso!")
         time.sleep(1)
         st.rerun()
-        
-    st.divider()
-    
-    st.write("📁 **Gestão de Projetos**")
-    
-    ed_p = st.data_editor(
-        df_projetos, 
-        num_rows="dynamic", 
-        hide_index=True
-    )
-    
-    if st.button("Salvar Projetos"):
-        with conn.session as s:
-            for r in ed_p.itertuples():
-                if r.nome: 
-                    s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": r.nome})
-            s.commit()
-        st.success("Projetos salvos com sucesso!")
-        st.rerun()
-
-    st.divider()
-    
-    st.write("🏦 **Dados Bancários**")
-    
-    ed_b = st.data_editor(
-        df_bancos, 
-        num_rows="dynamic", 
-        hide_index=True, 
-        column_config={
-            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"])
-        }
-    )
-    
-    if st.button("Salvar Bancos"):
-        with conn.session as s:
-            for r in ed_b.itertuples():
-                # Ignorar linhas vazias
-                if pd.isna(r.colaborador_email) or str(r.colaborador_email).strip() == "":
-                    continue
-                    
-                tk = getattr(r, 'tipo_chave', 'CPF')
-                s.execute(
-                    text("""
-                        INSERT INTO dados_bancarios (colaborador_email, banco, tipo_chave, chave_pix) 
-                        VALUES (:e, :b, :t, :c) 
-                        ON CONFLICT (colaborador_email) 
-                        DO UPDATE SET banco=:b, tipo_chave=:t, chave_pix=:c
-                    """), 
-                    {"e": r.colaborador_email, "b": r.banco, "t": tk, "c": r.chave_pix}
-                )
-            s.commit()
-        st.success("Dados bancários salvos com sucesso!")
-        st.rerun()
 
 # ==============================================================================
 # RODAPÉ
@@ -1421,7 +1399,7 @@ elif selected_tab == "⚙️ Configurações":
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray; font-size: 12px;'>"
-    "OnCall Humana - Developed by Pedro Reis | v12.4 Infinity Stable | "
+    "OnCall Humana - Developed by Pedro Reis | v12.5 Infinity Stable | "
     f"Status: Online | {datetime.now().strftime('%d/%m/%Y %H:%M')}"
     "</p>", 
     unsafe_allow_html=True
