@@ -1166,8 +1166,14 @@ elif selected_tab == "💸 Pagamentos":
                 )
             # ----------------------------------------
             
-            # --- SCORECARDS VISUAIS ---
-            st.markdown("### 📊 Resumo por Status")
+            # --- SCORECARD TOTAL GERAL (NOVO CANTO DIREITO) ---
+            c_titulo, c_total = st.columns([3, 1])
+            with c_titulo:
+                st.markdown("### 📊 Resumo por Status")
+            with c_total:
+                st.metric("💰 Total da Competência", f"R$ {df_pay['r$'].sum():,.2f}", f"{df_pay['horas'].sum():.2f}h", delta_color="off")
+            
+            # --- SCORECARDS VISUAIS DE STATUS ---
             c1, c2, c3, c4 = st.columns(4)
             
             df_aberto = df_pay[df_pay['status_pagamento'] == 'Em aberto']
@@ -1176,7 +1182,7 @@ elif selected_tab == "💸 Pagamentos":
             df_pago = df_pay[df_pay['status_pagamento'] == 'Pago']
             
             c1.metric("🔴 Em Aberto", f"R$ {df_aberto['r$'].sum():,.2f}", f"{df_aberto['horas'].sum():.2f}h", delta_color="off")
-            c2.metric("🔵 Liberado para Pagamento", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
+            c2.metric("🔵 Liberado para pagamento", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
             c3.metric("🟡 Parcial", f"R$ {df_parcial['r$'].sum():,.2f}", f"{df_parcial['horas'].sum():.2f}h", delta_color="off")
             c4.metric("🟢 Pago", f"R$ {df_pago['r$'].sum():,.2f}", f"{df_pago['horas'].sum():.2f}h", delta_color="off")
             
@@ -1212,10 +1218,10 @@ elif selected_tab == "💸 Pagamentos":
                     ops = ["Em aberto", "Liberado para pagamento", "Parcial", "Pago"]
                     ix = ops.index(s_at) if s_at in ops else 0
                     
-                    c1, c2 = st.columns([3, 1])
-                    ns = c1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
+                    c_up1, c_up2 = st.columns([3, 1])
+                    ns = c_up1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
                     
-                    if c2.button("Atualizar Pagamento", key=f"b_{idx}"):
+                    if c_up2.button("Atualizar Pagamento", key=f"b_{idx}"):
                         with conn.session as s:
                             ids_u = tuple(det['id'].tolist())
                             s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
