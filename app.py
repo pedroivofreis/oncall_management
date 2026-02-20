@@ -301,7 +301,7 @@ SUPER_ADMINS_LIST = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail
 
 # --- SIDEBAR: TELA DE LOGIN ---
 st.sidebar.title("♾️ OnCall Humana") # <--- Ícone atualizado aqui
-st.sidebar.caption("v12.5 Infinity Stable - <br> by Pedro Reis")
+st.sidebar.caption("v12.5 Infinity Stable")
 st.sidebar.markdown("---")
 
 if not auth_db:
