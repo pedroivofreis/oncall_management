@@ -373,6 +373,7 @@ if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
 # --- BOTÃO DE ELITE: BI ESTRATÉGICO (SOMENTE ADMIN) ---
+# Ele agora é o único ponto de acesso para o BI, limpando o menu de baixo
 if is_admin_session:
     if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True):
         st.session_state.selected_tab = "📈 BI Estratégico"
@@ -390,7 +391,7 @@ if is_admin_session:
         "📊 Gestão de Painéis", 
         "🛡️ Admin Aprovações", 
         "💸 Pagamentos", 
-        "📈 BI Estratégico", 
+        # "📈 BI Estratégico", <-- REMOVIDO DAQUI PARA NÃO DUPLICAR
         "⚙️ Configurações"
     ]
 else:
@@ -401,10 +402,15 @@ else:
         "🧾 Notas Fiscais"
     ]
 
-# O rádio agora sincroniza com o st.session_state para permitir que o botão lá de cima funcione
+# O rádio sincroniza com o st.session_state
+# Se a aba atual for o BI (vinda do botão), o rádio não seleciona nada ou mantém a anterior
 idx_tab = 0
 if st.session_state.selected_tab in app_menu_options:
     idx_tab = app_menu_options.index(st.session_state.selected_tab)
+else:
+    # Se estiver no BI Estratégico, o rádio não precisa marcar uma opção da lista
+    # Usamos um truque: se não está na lista, o rádio mantém o índice 0 mas não atualiza a sessão
+    pass
 
 selected_tab = st.sidebar.radio(
     "Ir para:", 
@@ -413,11 +419,12 @@ selected_tab = st.sidebar.radio(
     key="main_radio_menu"
 )
 
-# Sincroniza o estado global com a escolha do rádio
-st.session_state.selected_tab = selected_tab
+# Só atualiza a sessão se o usuário clicar no rádio (para não sobrescrever o clique do botão de BI)
+if selected_tab != st.session_state.selected_tab and selected_tab in app_menu_options:
+    st.session_state.selected_tab = selected_tab
 
 # Trava visual para o separador
-if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
+if st.session_state.selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
     st.sidebar.info("👆 Escolha uma das opções abaixo.")
     st.title("🔐 Área Administrativa")
     st.info("Selecione um dos módulos de gestão no menu lateral para continuar.")
