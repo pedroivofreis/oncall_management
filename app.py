@@ -1155,6 +1155,15 @@ elif selected_tab == "💸 Pagamentos":
             df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
             df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
             
+            # --- MÁGICA DE CORREÇÃO AQUI ---
+            # Como os lançamentos novos nascem com status vazio no banco (NaN), 
+            # forçamos o Pandas a preencher tudo com "Em aberto" para a soma funcionar!
+            if 'status_pagamento' not in df_pay.columns:
+                df_pay['status_pagamento'] = 'Em aberto'
+            else:
+                df_pay['status_pagamento'] = df_pay['status_pagamento'].fillna('Em aberto')
+            # -------------------------------
+            
             # --- SCORECARDS VISUAIS ---
             st.markdown("### 📊 Resumo por Status")
             c1, c2, c3, c4 = st.columns(4)
@@ -1179,7 +1188,7 @@ elif selected_tab == "💸 Pagamentos":
                 nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
                 
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
-                s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns and not det.empty else "Em aberto"
+                s_at = det['status_pagamento'].iloc[0] if not det.empty else "Em aberto"
                 
                 if s_at == "Pago": badge = "🟢 PAGO"
                 elif s_at == "Liberado para pagamento": badge = "🔵 LIBERADO"
