@@ -52,15 +52,15 @@ from sqlalchemy import text
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E META-DADOS
 # ==============================================================================
 st.set_page_config(
-    page_title="OnCall Humana - Master v12.4",
+    page_title="OnCall Humana - Master v12.5",
     layout="wide",
-    page_icon="🛡️",
+    page_icon="♾️",  # <--- Ícone atualizado aqui
     initial_sidebar_state="expanded",
     menu_items={
         'Get Help': 'https://www.oncall.com.br/help',
         'Report a bug': "mailto:suporte@oncall.com.br",
         'About': """
-        # OnCall Humana ERP v12.4
+        # OnCall Humana ERP v12.5
         Sistema oficial de gestão de horas e pagamentos.
         Desenvolvido com Python/Streamlit e PostgreSQL.
         """
@@ -300,8 +300,8 @@ if not df_u_login.empty:
 SUPER_ADMINS_LIST = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
 # --- SIDEBAR: TELA DE LOGIN ---
-st.sidebar.title("🛡️ OnCall Humana")
-st.sidebar.caption("v12.4 Infinity Stable")
+st.sidebar.title("♾️ OnCall Humana") # <--- Ícone atualizado aqui
+st.sidebar.caption("v12.5 Infinity Stable")
 st.sidebar.markdown("---")
 
 if not auth_db:
@@ -319,8 +319,28 @@ user_selection_visual = st.sidebar.selectbox(
 )
 
 if user_selection_visual == "...":
-    st.info("👈 Por favor, selecione seu usuário no menu lateral para acessar o sistema.")
-    st.image("https://img.freepik.com/free-vector/access-control-system-abstract-concept_335657-3180.jpg", use_container_width=True)
+    # --- TELA DE BOAS VINDAS (SUBSTITUI A IMAGEM FEIA) ---
+    st.markdown("""
+    <div style="padding: 2rem; border-radius: 10px; background-color: rgba(128, 128, 128, 0.05); border: 1px solid rgba(128, 128, 128, 0.2);">
+        <h1 style="color: #0f54c9; margin-bottom: 0;">♾️ OnCall Humana</h1>
+        <h4 style="color: gray; margin-top: 0;">Enterprise Resource Planning</h4>
+        <hr style="opacity: 0.2;">
+        <h3>🔐 Acesso Autenticado</h3>
+        <p>Por favor, <b>selecione seu nome</b> no menu lateral esquerdo e insira sua senha para acessar o seu painel.</p>
+        <br>
+        <h4>📌 Diretrizes do Sistema:</h4>
+        <ul>
+            <li><b>Registro de Atividades:</b> Preencha suas horas detalhando o escopo e garantindo a <b>Data Real</b> correta da execução.</li>
+            <li><b>Notas Fiscais:</b> Realize o upload do PDF e confirme o valor exato da nota para agilizar o faturamento.</li>
+            <li><b>Aprovações:</b> Edições em lançamentos pendentes notificam a administração automaticamente.</li>
+        </ul>
+        <br><br>
+        <p style='color: gray; font-size: 0.85em; text-align: justify;'>
+        <i><b>Disclaimer de Segurança:</b> Este é um ambiente corporativo privado. O acesso é restrito a colaboradores e parceiros autorizados da OnCall. Todas as transações financeiras, aprovações e uploads de documentos são registrados com marcação de tempo. Em caso de perda de senha ou necessidade de acesso a novos projetos, contate a administração do sistema.</i>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.stop()
 
 current_user_email = login_visual_map[user_selection_visual]
