@@ -961,7 +961,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
 
     st.divider()
     
-    # --- BLOCO C: APROVADOS (EDIÇÃO TOTAL + EXCLUSÃO + SYNC DATA) ---
+   # --- BLOCO C: APROVADOS (EDIÇÃO TOTAL + EXCLUSÃO + SYNC DATA) ---
     st.markdown("### ✅ Histórico de Aprovados (Edição e Exclusão)")
     st.caption("Ajuste datas, projetos, tipos (itens) ou exclua itens aprovados indevidamente.")
     
@@ -973,7 +973,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_a = df_a[df_a['colaborador_email'] == e_a]
         
     if not df_a.empty:
-        df_a = df_a[['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
+        # Garante que as colunas necessárias existam
+        cols_view = ['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']
+        df_a = df_a[cols_view]
         df_a.insert(0, "Excluir", False)
         
         ed_a = st.data_editor(
@@ -987,7 +989,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
                 "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True),
                 "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
-                # Adicionado "Custo Operacional" aqui também
                 "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Custo Operacional", "Outros"], required=True)
             }
         )
@@ -998,12 +999,17 @@ elif selected_tab == "🛡️ Admin Aprovações":
             count_updates = 0
             
             with conn.session as s:
+                # 1. Executa as Exclusões
                 if ids_to_delete:
                     s.execute(text("DELETE FROM lancamentos WHERE id IN :ids"), {"ids": tuple(ids_to_delete)})
                 
+                # 2. Executa as Atualizações
                 for r in df_to_update.itertuples():
                     try:
-                        d_val = getattr(r, "Data_Real") 
+                        # BLINDAGEM: Acessa a coluna "Data Real" independente do nome que o itertuples der
+                        # O getattr busca pelo nome da coluna no DataFrame original
+                        d_val = getattr(r, 'Data_Real', getattr(r, '_6', None)) # _6 costuma ser a posição da Data
+                        
                         if isinstance(d_val, str): d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
                         elif isinstance(d_val, pd.Timestamp): d_obj = d_val.date()
                         else: d_obj = d_val 
@@ -1017,20 +1023,25 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                 SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, tipo=:t, competencia=:c, data_atividade=:da 
                                 WHERE id=:id
                             """),
-                            {"s": r.status_aprovaca, "h": r.horas, "d": r.descricao, "p": r.projeto, "t": r.tipo, "c": c_s, "da": d_s, "id": r.id}
+                            {
+                                "s": r.status_aprovaca, 
+                                "h": r.horas, 
+                                "d": r.descricao, 
+                                "p": r.projeto, 
+                                "t": r.tipo, 
+                                "c": c_s, 
+                                "da": d_s, 
+                                "id": r.id
+                            }
                         )
                         count_updates += 1
                     except Exception as e:
                         st.error(f"Erro ao atualizar linha ID {r.id}: {e}")
                 s.commit()
             
-            msgs = []
-            if ids_to_delete: msgs.append(f"{len(ids_to_delete)} itens excluídos")
-            if count_updates > 0: msgs.append(f"{count_updates} itens atualizados")
-            
-            if msgs:
-                st.success(" e ".join(msgs) + " com sucesso!")
-                time.sleep(1.5); st.rerun()
+            st.success(f"Sucesso: {count_updates} atualizados e {len(ids_to_delete)} excluídos!")
+            time.sleep(1.5)
+            st.rerun()
     else:
         st.info("Nenhum item aprovado para este filtro.")
 
