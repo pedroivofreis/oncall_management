@@ -855,7 +855,8 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_p = df_p[df_p['colaborador_email'] == e_p]
         
     if not df_p.empty:
-        df_p = df_p[['foi_editado', 'descricao', 'Nome', 'projeto', 'Data Real', 'horas', 'id']]
+        # 1. ADICIONADO 'tipo' AQUI
+        df_p = df_p[['foi_editado', 'descricao', 'Nome', 'projeto', 'tipo', 'Data Real', 'horas', 'id']]
         df_p.insert(0, "✅", sel_all)
         df_p.insert(1, "🗑️", False)
         
@@ -869,18 +870,26 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 "🗑️": st.column_config.CheckboxColumn("Rej", width="small"),
                 "foi_editado": st.column_config.CheckboxColumn("⚠️ Editado?", disabled=True, help="O usuário alterou este item recentemente!"),
                 "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "horas": st.column_config.NumberColumn("HH.MM", format="%.2f")
+                "horas": st.column_config.NumberColumn("HH.MM", format="%.2f"),
+                # 2. ADICIONADO COMBOBOX PARA PROJETO E TIPO (ITEM) NAS PENDÊNCIAS
+                "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
+                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Outros"], required=True)
             }
         )
         
         c1, c2 = st.columns(2)
         if c1.button("Aprovar Selecionados", type="primary"):
-            ids = ed_p[ed_p["✅"] == True]["id"].tolist()
-            if ids:
+            df_to_approve = ed_p[ed_p["✅"] == True]
+            if not df_to_approve.empty:
                 with conn.session as s:
-                    s.execute(text("UPDATE lancamentos SET status_aprovaca='Aprovado', foi_editado=FALSE WHERE id IN :ids"), {"ids": tuple(ids)})
+                    # 3. AGORA O APROVAR TAMBÉM SALVA QUALQUER EDIÇÃO FEITA NA TELA
+                    for r in df_to_approve.itertuples():
+                        s.execute(
+                            text("UPDATE lancamentos SET status_aprovaca='Aprovado', foi_editado=FALSE, projeto=:p, tipo=:t, horas=:h, descricao=:d WHERE id=:id"), 
+                            {"p": r.projeto, "t": r.tipo, "h": r.horas, "d": r.descricao, "id": r.id}
+                        )
                     s.commit()
-                st.toast("Aprovado!")
+                st.toast("Aprovado e atualizado!")
                 time.sleep(0.5)
                 st.rerun()
                 
@@ -900,7 +909,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
     
     # --- BLOCO C: APROVADOS (EDIÇÃO TOTAL + EXCLUSÃO + SYNC DATA) ---
     st.markdown("### ✅ Histórico de Aprovados (Edição e Exclusão)")
-    st.caption("Ajuste datas, projetos, ou exclua itens aprovados indevidamente.")
+    st.caption("Ajuste datas, projetos, tipos (itens) ou exclua itens aprovados indevidamente.")
     
     f_a = st.selectbox("Filtrar Aprovados:", lista_filtro_pend, key="fa_adm")
     
@@ -910,7 +919,8 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_a = df_a[df_a['colaborador_email'] == e_a]
         
     if not df_a.empty:
-        df_a = df_a[['descricao', 'Nome', 'projeto', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
+        # 4. ADICIONADO 'tipo' AQUI NA ABA DE APROVADOS
+        df_a = df_a[['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
         
         # Inserir coluna de deleção no dataframe visual
         df_a.insert(0, "Excluir", False)
@@ -924,7 +934,10 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir", width="small", help="Marque para deletar este lançamento do banco."),
                 "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Aprovado", "Pendente", "Negado"], required=True),
                 "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
-                "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True)
+                "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True),
+                # 5. ADICIONADO COMBOBOX PARA PROJETO E TIPO (ITEM)
+                "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
+                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Outros"], required=True)
             }
         )
         
@@ -954,13 +967,14 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         c_s = d_obj.strftime("%Y-%m")
                         d_s = d_obj.strftime("%Y-%m-%d")
                         
+                        # 6. UPDATE SQL COM O CAMPO 'tipo' ADICIONADO E MAPADO COMO ':t'
                         s.execute(
                             text("""
                                 UPDATE lancamentos 
-                                SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, competencia=:c, data_atividade=:da 
+                                SET status_aprovaca=:s, horas=:h, descricao=:d, projeto=:p, tipo=:t, competencia=:c, data_atividade=:da 
                                 WHERE id=:id
                             """),
-                            {"s": r.status_aprovaca, "h": r.horas, "d": r.descricao, "p": r.projeto, "c": c_s, "da": d_s, "id": r.id}
+                            {"s": r.status_aprovaca, "h": r.horas, "d": r.descricao, "p": r.projeto, "t": r.tipo, "c": c_s, "da": d_s, "id": r.id}
                         )
                         count_updates += 1
                     except Exception as e:
