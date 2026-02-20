@@ -1275,7 +1275,7 @@ elif selected_tab == "⚙️ Configurações":
         hide_index=True, 
         key="usuarios_editor_fix",
         column_config={
-            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small"),
+            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small", default=False),
             "email": st.column_config.TextColumn("Login (Email)", required=True),
             "nome": st.column_config.TextColumn("Nome de Exibição"),
             "senha": st.column_config.TextColumn("Senha (Texto)", required=True),
@@ -1285,6 +1285,9 @@ elif selected_tab == "⚙️ Configurações":
     )
     
     if st.button("Salvar Usuários", type="primary"):
+        # MÁGICA AQUI: Garante que as linhas novas não sejam ignoradas por causa do nulo (NaN)
+        ed_u["Excluir"] = ed_u["Excluir"].fillna(False)
+        
         ids_to_delete = ed_u[ed_u["Excluir"] == True]["email"].tolist()
         df_to_update = ed_u[ed_u["Excluir"] == False]
         count_u, count_del = 0, 0
@@ -1337,10 +1340,16 @@ elif selected_tab == "⚙️ Configurações":
         num_rows="dynamic", 
         hide_index=True,
         key="projetos_editor_fix",
-        column_config={"Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small")}
+        column_config={
+            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small", default=False),
+            "nome": st.column_config.TextColumn("Nome do Projeto", required=True)
+        }
     )
     
     if st.button("Salvar Projetos"):
+        # MÁGICA AQUI: Salva-vidas do checkbox nulo
+        ed_p["Excluir"] = ed_p["Excluir"].fillna(False)
+        
         ids_del = ed_p[ed_p["Excluir"] == True]["nome"].tolist()
         df_upd = ed_p[ed_p["Excluir"] == False]
         
@@ -1369,12 +1378,15 @@ elif selected_tab == "⚙️ Configurações":
         hide_index=True,
         key="bancos_editor_fix",
         column_config={
-            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small"),
+            "Excluir": st.column_config.CheckboxColumn("🗑️ Excl", width="small", default=False),
             "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"])
         }
     )
     
     if st.button("Salvar Bancos"):
+        # MÁGICA AQUI: Salva-vidas do checkbox nulo
+        ed_b["Excluir"] = ed_b["Excluir"].fillna(False)
+        
         ids_del = ed_b[ed_b["Excluir"] == True]["colaborador_email"].tolist()
         df_upd = ed_b[ed_b["Excluir"] == False]
         
