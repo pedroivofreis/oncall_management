@@ -72,32 +72,75 @@ st.set_page_config(
 # ==============================================================================
 st.markdown("""
 <style>
-    /* ... (Mantenha as regras anteriores e adicione estas abaixo) ... */
+    /* Ajuste do container principal */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 5rem;
+        max-width: 98% !important;
+    }
 
-    /* Botão de Destaque para o BI Estratégico */
-    div.stButton > button:first-child {
-        background-color: #0f54c9;
-        color: white;
-        border-radius: 8px;
-        height: 3em;
-        width: 100%;
-        font-weight: bold;
-        border: none;
+    /* --- OS SCORECARDS BONITINHOS VOLTARAM --- */
+    /* Estilo dos Cards de Métricas (KPIs) */
+    div[data-testid="stMetric"] {
+        background-color: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        padding: 20px;
+        border-radius: 12px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
+        transition: all 0.3s ease-in-out;
     }
     
-    /* Estilização do Divisor da Área Admin */
+    /* Efeito de destaque ao passar o mouse */
+    div[data-testid="stMetric"]:hover {
+        border-color: #0f54c9;
+        transform: translateY(-4px);
+        background-color: rgba(15, 84, 201, 0.05);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+    }
+
+    /* Labels e títulos mais fortes */
+    label {
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        letter-spacing: 0.02em;
+    }
+
+    /* Cabeçalhos de Expander (Azul Corporativo) */
+    .streamlit-expanderHeader {
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: #0f54c9;
+        background-color: rgba(128, 128, 128, 0.08);
+        border-radius: 8px;
+        padding: 12px;
+        border: 1px solid rgba(128, 128, 128, 0.1);
+    }
+
+    /* Botão de Destaque (BI Estratégico) no Sidebar */
+    div.stButton > button {
+        border-radius: 8px;
+        font-weight: bold;
+        transition: all 0.2s;
+    }
+
+    /* Estilização específica do separador Admin no Menu */
     .admin-divider {
         margin: 1.5rem 0 0.5rem 0;
-        padding: 5px;
+        padding: 8px;
         background-color: rgba(15, 84, 201, 0.1);
         border-left: 5px solid #0f54c9;
         font-weight: bold;
         color: #0f54c9;
-        font-size: 0.8rem;
-        letter-spacing: 1px;
+        font-size: 0.75rem;
+        letter-spacing: 1.2px;
         text-transform: uppercase;
+        border-radius: 0 4px 4px 0;
+    }
+    
+    /* Botões Primários (Gradiente Azul) */
+    button[kind="primary"] {
+        background: linear-gradient(90deg, #0f54c9 0%, #0a3a8b 100%) !important;
+        border: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
