@@ -1,10 +1,10 @@
 """
 ====================================================================================================
-ONCALL HUMANA ERP - SYSTEM MASTER v12.2 "INFINITY STABLE"
+ONCALL HUMANA ERP - SYSTEM MASTER v12.3 "INFINITY STABLE"
 ====================================================================================================
 Desenvolvido por: Pedro Reis
 Data: Fevereiro/2026
-Versão: 12.2 Enterprise Edition (Procedural Architecture)
+Versão: 12.3 Enterprise Edition (Procedural Architecture)
 
 DESCRIÇÃO TÉCNICA DO SISTEMA:
 -----------------------------
@@ -22,19 +22,12 @@ MÓDULOS DO SISTEMA:
 5. VIEW - LANÇAMENTOS: Formulário de input para colaboradores.
 6. VIEW - HISTÓRICO: Interface para o colaborador ver e editar seus itens pendentes.
 7. VIEW - PAINEL: Dashboards financeiros com filtros de competência (Mês/Ano).
-8. VIEW - ADMIN: Central de aprovação, edição em massa e correção de dados (Importação via XLSX).
-9. VIEW - NOTAS FISCAIS: Upload e gestão de PDFs de Invoices integrados ao banco.
+8. VIEW - ADMIN: Central de aprovação, edição em massa e correção de dados.
+   **FEATURE CRÍTICA:** Sincronia automática entre Data Real e Competência Financeira.
+9. VIEW - NOTAS FISCAIS: Upload, aprovação e gestão de PDFs.
 10. VIEW - FINANCEIRO: Consolidação de pagamentos e drill-down por colaborador.
 11. VIEW - BI: Gráficos executivos.
-12. VIEW - CONFIG: CRUD de tabelas auxiliares (Usuários e Projetos).
-
-TABELAS DO BANCO DE DADOS (SCHEMA):
-- usuarios: email (PK), senha, valor_hora, is_admin, nome
-- projetos: nome (PK)
-- lancamentos: id (PK), colaborador_email, projeto, horas, competencia, data_atividade,
-               tipo, descricao, data_registro, valor_hora_historico, status_aprovaca,
-               status_pagamento, foi_editado
-- invoices: id (PK), collaborator_email, competence, amount, file_name, file_pdf, status
+12. VIEW - CONFIG: CRUD de tabelas auxiliares (Usuários, Projetos, Bancos).
 ====================================================================================================
 """
 
@@ -50,7 +43,7 @@ from sqlalchemy import text
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E META-DADOS
 # ==============================================================================
 st.set_page_config(
-    page_title="OnCall Humana - Master v12.2",
+    page_title="OnCall Humana - Master v12.3",
     layout="wide",
     page_icon="🛡️",
     initial_sidebar_state="expanded",
@@ -58,7 +51,7 @@ st.set_page_config(
         'Get Help': 'https://www.oncall.com.br/help',
         'Report a bug': "mailto:suporte@oncall.com.br",
         'About': """
-        # OnCall Humana ERP v12.2
+        # OnCall Humana ERP v12.3
         Sistema oficial de gestão de horas, pagamentos e Notas Fiscais.
         Desenvolvido com Python/Streamlit e PostgreSQL.
         """
@@ -68,6 +61,9 @@ st.set_page_config(
 # ==============================================================================
 # 2. ESTILIZAÇÃO CSS AVANÇADA (ENTERPRISE UI/UX)
 # ==============================================================================
+# O CSS abaixo garante que a interface seja legível tanto no modo claro quanto escuro,
+# além de padronizar componentes como botões, tabelas e cards de métricas.
+
 st.markdown("""
 <style>
     /* Ajuste do container principal para maximizar a área útil */
@@ -78,6 +74,7 @@ st.markdown("""
     }
 
     /* Estilo dos Cards de Métricas (KPIs) */
+    /* Adiciona borda suave e fundo translúcido para destaque */
     div[data-testid="stMetric"] {
         background-color: rgba(255, 255, 255, 0.03);
         border: 1px solid rgba(128, 128, 128, 0.2);
@@ -144,41 +141,64 @@ st.markdown("""
 # 3. GERENCIAMENTO DE CONEXÃO COM O BANCO DE DADOS (DAL)
 # ==============================================================================
 def get_connection():
+    """
+    Estabelece uma conexão segura e persistente com o banco de dados Neon (PostgreSQL).
+    """
     try:
+        # Cria a conexão usando a engine nativa do Streamlit
         c = st.connection("postgresql", type="sql")
+        
+        # Query de verificação de latência e saúde
         c.query("SELECT 1", ttl=0) 
+        
         return c
     except Exception as e:
+        # Em caso de falha crítica, interrompe a aplicação para evitar comportamento instável
         st.error("🔴 Erro Crítico de Conexão com o Banco de Dados.")
         st.error(f"Detalhe técnico: {e}")
         st.info("Verifique sua conexão com a internet ou as credenciais no arquivo .streamlit/secrets.toml")
         st.stop()
 
+# Instância global da conexão para ser reutilizada
 conn = get_connection()
 
 # ==============================================================================
 # 4. BIBLIOTECA DE FUNÇÕES UTILITÁRIAS (HELPER FUNCTIONS)
 # ==============================================================================
+
 def convert_hhmm_to_decimal(pseudo_hour):
+    """
+    Converte o formato visual de horas HH.MM (Ex: 2.30) para formato Decimal (2.50).
+    """
     try:
         if pd.isna(pseudo_hour) or pseudo_hour == "":
             return 0.0
+        
         val_str = f"{float(pseudo_hour):.2f}"
         parts = val_str.split('.')
+        
         if len(parts) != 2:
             return float(pseudo_hour)
+            
         horas_inteiras = int(parts[0])
         minutos = int(parts[1])
+        
         if minutos >= 60:
             return float(pseudo_hour)
+            
         return horas_inteiras + (minutos / 60.0)
     except Exception:
         return 0.0
 
 def normalize_text_fields(text_val):
+    """
+    Padroniza strings para garantir consistência no Banco de Dados e nos Gráficos de BI.
+    """
     if not isinstance(text_val, str):
         return "Outros"
+        
     t = text_val.strip().lower()
+    
     if "back" in t and "end" in t: return "Back-end"
     if "front" in t and "end" in t: return "Front-end"
     if "dados" in t or "data" in t: return "Eng. Dados"
@@ -189,22 +209,30 @@ def normalize_text_fields(text_val):
     if "gest" in t or "agile" in t: return "Gestão"
     if "design" in t or "ux" in t: return "Design/UX"
     if "api" in t: return "Integrações/API"
+    
     return text_val.capitalize()
 
 def calculate_competence(date_obj):
+    """
+    Gera a string de competência (YYYY-MM) a partir de um objeto de data.
+    """
     if not date_obj:
         return datetime.now().strftime("%Y-%m")
+    
     if isinstance(date_obj, str):
         try:
             date_obj = datetime.strptime(date_obj, "%Y-%m-%d")
         except:
             return datetime.now().strftime("%Y-%m")
+            
     return date_obj.strftime("%Y-%m")
 
 # ==============================================================================
 # 5. DATA ACCESS LAYER (DAL) - FUNÇÕES DE LEITURA
 # ==============================================================================
+
 def fetch_all_launch_data(): 
+    """Busca a tabela completa de lançamentos."""
     try:
         query = "SELECT * FROM lancamentos ORDER BY competencia DESC, data_atividade DESC, data_registro DESC"
         return conn.query(query, ttl=0)
@@ -213,6 +241,7 @@ def fetch_all_launch_data():
         return pd.DataFrame()
 
 def fetch_users_data(): 
+    """Busca tabela de usuários para login e mapeamento."""
     try:
         return conn.query("SELECT * FROM usuarios ORDER BY email", ttl=0)
     except Exception as e:
@@ -220,12 +249,21 @@ def fetch_users_data():
         return pd.DataFrame()
 
 def fetch_projects_data(): 
+    """Busca tabela de projetos ativos."""
     try:
         return conn.query("SELECT * FROM projetos ORDER BY nome", ttl=0)
     except:
         return pd.DataFrame(columns=["nome"])
 
+def fetch_banking_data(): 
+    """Busca dados bancários para a folha de pagamento."""
+    try:
+        return conn.query("SELECT * FROM dados_bancarios", ttl=0)
+    except:
+        return pd.DataFrame()
+
 def fetch_invoices_data():
+    """Busca os dados de notas fiscais (Invoices) do banco Neon."""
     try:
         query = "SELECT id, collaborator_email, competence, amount, file_name, status FROM invoices ORDER BY competence DESC"
         return conn.query(query, ttl=0)
@@ -235,22 +273,28 @@ def fetch_invoices_data():
 # ==============================================================================
 # 6. SISTEMA DE AUTENTICAÇÃO E GESTÃO DE SESSÃO
 # ==============================================================================
+
+# Carrega dados dos usuários no início da execução
 try:
     df_u_login = fetch_users_data()
 except Exception as e:
     st.error("Erro fatal: Não foi possível carregar a tabela de usuários.")
     st.stop()
 
+# --- MAPEAMENTO INTELIGENTE DE NOMES ---
 email_to_name_map = {}
+
 if not df_u_login.empty:
     for row in df_u_login.itertuples():
         nome_db = getattr(row, 'nome', None)
+        
         if nome_db and str(nome_db).strip() != "":
             email_to_name_map[row.email] = str(nome_db).strip()
         else:
             clean_name = row.email.split('@')[0].replace('.', ' ').title()
             email_to_name_map[row.email] = clean_name
 
+# --- DICIONÁRIO DE AUTENTICAÇÃO E PERMISSÕES ---
 auth_db = {}
 if not df_u_login.empty:
     auth_db = {
@@ -264,8 +308,9 @@ if not df_u_login.empty:
 
 SUPER_ADMINS_LIST = ["pedroivofernandesreis@gmail.com", "claudiele.andrade@gmail.com"]
 
+# --- SIDEBAR: TELA DE LOGIN ---
 st.sidebar.title("🛡️ OnCall Humana")
-st.sidebar.caption("v12.2 Infinity Stable")
+st.sidebar.caption("v12.3 Infinity Stable")
 st.sidebar.markdown("---")
 
 if not auth_db:
@@ -315,7 +360,7 @@ if is_admin_session:
         "📝 Lançamentos", 
         "🗂️ Histórico Pessoal", 
         "📊 Gestão de Painéis", 
-        "🛡️ Admin Aprovações", 
+        "🛡️ Admin Aprovações",
         "🧾 Notas Fiscais",
         "💸 Pagamentos", 
         "📈 BI Estratégico", 
@@ -337,6 +382,7 @@ selected_tab = st.sidebar.radio("Ir para:", app_menu_options)
 try:
     df_lancamentos = fetch_all_launch_data()
     df_projetos = fetch_projects_data()
+    df_bancos = fetch_banking_data()
     df_invoices = fetch_invoices_data()
 except Exception as e:
     st.error(f"Erro ao carregar dados globais: {e}")
@@ -414,7 +460,8 @@ if selected_tab == "📝 Lançamentos":
                         s.commit()
                     
                     st.toast(f"✅ Lançamento salvo: {input_horas}h em {data_full_str}", icon="✅")
-                    time.sleep(1.5); st.rerun()
+                    time.sleep(1.5)
+                    st.rerun()
                     
                 except Exception as e:
                     st.error("Erro ao salvar no banco de dados.")
@@ -454,7 +501,7 @@ elif selected_tab == "🗂️ Histórico Pessoal":
                     with conn.session as s:
                         for row in edited_my_pend.itertuples():
                             try:
-                                d_val = row.Data_Real if hasattr(row, 'Data_Real') else getattr(row, '_3', None)
+                                d_val = row.Data_Real if hasattr(row, 'Data_Real') else row._3
                                 
                                 if isinstance(d_val, str): 
                                     d_val = datetime.strptime(d_val, "%Y-%m-%d").date()
@@ -479,7 +526,8 @@ elif selected_tab == "🗂️ Histórico Pessoal":
                     
                     if count_edits > 0:
                         st.toast("Edições salvas! O Admin foi notificado.", icon="⚠️")
-                        time.sleep(1.5); st.rerun()
+                        time.sleep(1.5)
+                        st.rerun()
             else:
                 st.info("Você não tem itens pendentes no momento.")
 
@@ -530,6 +578,7 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
         all_competencias = []
         
     c_f1, c_f2 = st.columns([1, 3])
+    
     comp_selecionadas = c_f1.multiselect(
         "📅 Filtrar Competência(s):", 
         all_competencias, 
@@ -588,14 +637,14 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
             st.info("Nenhum registro encontrado para as competências selecionadas.")
 
 # ==============================================================================
-# ABA 4: ADMIN APROVAÇÕES
+# ABA 4: ADMIN APROVAÇÕES (AQUI ESTÁ O CORAÇÃO DO SISTEMA)
 # ==============================================================================
 elif selected_tab == "🛡️ Admin Aprovações":
     st.subheader("🛡️ Central de Gestão Operacional")
     
-    # --- BLOCO A: IMPORTAÇÃO EM MASSA VIA XLSX ---
+    # --- BLOCO A: IMPORTAÇÃO EM MASSA (XLSX) ---
     with st.expander("📥 Importação em Massa (XLSX)", expanded=False):
-        st.info("Faça o upload da planilha e mapeie as colunas com os campos do sistema. A competência será gerada automaticamente.")
+        st.info("Faça o upload da planilha e mapeie as colunas. A competência será gerada automaticamente.")
         uploaded_file = st.file_uploader("Upload de Lançamentos", type=['xlsx', 'xls'])
         
         if uploaded_file is not None:
@@ -611,13 +660,13 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 
                 c_mp4, c_mp5, c_mp6 = st.columns(3)
                 map_horas = c_mp4.selectbox("Horas *", cols_opcoes, index=0)
-                map_tipo = c_mp5.selectbox("Tipo de Atividade", cols_opcoes, index=0)
+                map_tipo = c_mp5.selectbox("Tipo", cols_opcoes, index=0)
                 map_desc = c_mp6.selectbox("Descrição *", cols_opcoes, index=0)
                 
                 if st.button("🚀 Executar Importação", type="primary"):
                     valid = all(v != "-- Selecione --" for v in [map_data, map_email, map_proj, map_horas, map_desc])
                     if not valid:
-                        st.error("Mapeie todas as colunas obrigatórias sinalizadas com asterisco (*).")
+                        st.error("Mapeie as colunas obrigatórias com asterisco (*).")
                     else:
                         count_imported = 0
                         with conn.session as s:
@@ -652,7 +701,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                 )
                                 count_imported += 1
                             s.commit()
-                        st.success(f"{count_imported} registros importados com sucesso!"); time.sleep(1.5); st.rerun()
+                        st.success(f"{count_imported} registros importados com sucesso!")
+                        time.sleep(1.5)
+                        st.rerun()
             except Exception as e:
                 st.error(f"Erro ao ler arquivo: {e}")
 
@@ -698,7 +749,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 with conn.session as s:
                     s.execute(text("UPDATE lancamentos SET status_aprovaca='Aprovado', foi_editado=FALSE WHERE id IN :ids"), {"ids": tuple(ids)})
                     s.commit()
-                st.toast("Aprovado!"); time.sleep(0.5); st.rerun()
+                st.toast("Aprovado!")
+                time.sleep(0.5)
+                st.rerun()
                 
         if c2.button("Rejeitar Selecionados"):
             ids = ed_p[ed_p["🗑️"] == True]["id"].tolist()
@@ -706,7 +759,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 with conn.session as s:
                     s.execute(text("UPDATE lancamentos SET status_aprovaca='Negado' WHERE id IN :ids"), {"ids": tuple(ids)})
                     s.commit()
-                st.toast("Rejeitado!"); time.sleep(0.5); st.rerun()
+                st.toast("Rejeitado!")
+                time.sleep(0.5)
+                st.rerun()
     else:
         st.info("Nada pendente.")
 
@@ -744,6 +799,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 for r in ed_a.itertuples():
                     try:
                         d_val = getattr(r, "Data_Real") 
+                        
                         if isinstance(d_val, str): 
                             d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
                         elif isinstance(d_val, pd.Timestamp): 
@@ -768,7 +824,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 s.commit()
             
             if count_updates > 0:
-                st.success(f"{count_updates} registros atualizados e sincronizados!"); time.sleep(1); st.rerun()
+                st.success(f"{count_updates} registros atualizados e sincronizados!")
+                time.sleep(1)
+                st.rerun()
     else:
         st.info("Nenhum item aprovado para este filtro.")
 
@@ -792,7 +850,8 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         if r.status_aprovaca != "Negado":
                             s.execute(text("UPDATE lancamentos SET status_aprovaca=:s WHERE id=:id"), {"s": r.status_aprovaca, "id": r.id})
                     s.commit()
-                st.success("Recuperado!"); st.rerun()
+                st.success("Recuperado!")
+                st.rerun()
                 
             if c_del.button("🔥 EXCLUIR DEFINITIVAMENTE", type="primary"):
                 with conn.session as s:
@@ -800,7 +859,8 @@ elif selected_tab == "🛡️ Admin Aprovações":
                     if ids_del:
                         s.execute(text("DELETE FROM lancamentos WHERE id IN :ids"), {"ids": ids_del})
                         s.commit()
-                st.warning("Excluído!"); st.rerun()
+                st.warning("Excluído!")
+                st.rerun()
         else:
             st.info("Lixeira vazia.")
 
@@ -827,8 +887,11 @@ elif selected_tab == "🧾 Notas Fiscais":
                         {"id": str(uuid.uuid4()), "e": email_solic, "c": nf_comp}
                     )
                     s.commit()
-                st.success("Solicitação criada com sucesso!"); time.sleep(1); st.rerun()
+                st.success("Solicitação criada com sucesso!")
+                time.sleep(1)
+                st.rerun()
         
+        st.markdown("### 📋 Análise de NFs")
         if not df_invoices.empty:
             for r in df_invoices.itertuples():
                 nm_exibicao = email_to_name_map.get(r.collaborator_email, r.collaborator_email)
@@ -838,13 +901,21 @@ elif selected_tab == "🧾 Notas Fiscais":
                     if r.status == "Pendente de Aprovação":
                         st.info(f"Arquivo: {r.file_name}")
                         
-                        if st.button(f"📥 Baixar Arquivo NF", key=f"dl_{r.id}"):
-                            with conn.session as s:
-                                res = s.execute(text("SELECT file_pdf FROM invoices WHERE id = :id"), {"id": r.id}).fetchone()
-                                if res and res[0]:
-                                    st.download_button("Clique aqui para salvar", data=res[0], file_name=r.file_name, mime="application/pdf")
-                                else: 
-                                    st.error("Arquivo corrompido ou não encontrado.")
+                        # Conversão para Bytes para o Streamlit não dar erro de memoryview
+                        with conn.session as s:
+                            res = s.execute(text("SELECT file_pdf FROM invoices WHERE id = :id"), {"id": r.id}).fetchone()
+                        
+                        if res and res[0]:
+                            pdf_bytes = bytes(res[0])
+                            st.download_button(
+                                label="📥 Baixar Arquivo NF", 
+                                data=pdf_bytes, 
+                                file_name=r.file_name, 
+                                mime="application/pdf",
+                                key=f"dl_{r.id}"
+                            )
+                        else: 
+                            st.error("Arquivo corrompido ou não encontrado no banco de dados.")
                                 
                         c_ap, c_rj = st.columns(2)
                         if c_ap.button("✅ Aprovar NF", key=f"ap_{r.id}"):
@@ -852,6 +923,7 @@ elif selected_tab == "🧾 Notas Fiscais":
                                 s.execute(text("UPDATE invoices SET status='Aprovada' WHERE id=:id"), {"id": r.id})
                                 s.commit()
                             st.rerun()
+                            
                         if c_rj.button("❌ Rejeitar NF", key=f"rj_{r.id}"):
                             with conn.session as s: 
                                 s.execute(text("UPDATE invoices SET status='Rejeitada' WHERE id=:id"), {"id": r.id})
@@ -893,7 +965,9 @@ elif selected_tab == "🧾 Notas Fiscais":
                                         {"v": valor_nf, "an": pdf_name, "ap": pdf_bytes, "id": r.id}
                                     )
                                     s.commit()
-                                st.success("Nota Fiscal enviada com sucesso!"); time.sleep(1); st.rerun()
+                                st.success("Nota Fiscal enviada com sucesso!")
+                                time.sleep(1)
+                                st.rerun()
                             else:
                                 st.error("Preencha o valor e anexe o PDF.")
                 else:
@@ -949,7 +1023,9 @@ elif selected_tab == "💸 Pagamentos":
                         ids_u = tuple(det['id'].tolist())
                         s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
                         s.commit()
-                    st.toast("Pago!"); time.sleep(0.5); st.rerun()
+                    st.toast("Pago!")
+                    time.sleep(0.5)
+                    st.rerun()
     else:
         st.info("Nenhum lançamento aprovado.")
 
@@ -986,6 +1062,7 @@ elif selected_tab == "📈 BI Estratégico":
         
         st.divider()
         st.write("**🏆 Ranking de Colaboradores (Por Nome)**")
+        
         rank = df_bi.groupby("Nome").agg({'horas': 'sum', 'custo': 'sum'}).sort_values('horas', ascending=False)
         st.dataframe(rank, use_container_width=True, column_config={"custo": st.column_config.NumberColumn("R$", format="%.2f")})
     else:
@@ -1011,6 +1088,7 @@ elif selected_tab == "⚙️ Configurações":
             "valor_hora": st.column_config.NumberColumn("Valor Hora")
         }
     )
+    
     if st.button("Salvar Usuários"):
         with conn.session as s:
             for r in ed_u.itertuples():
@@ -1027,19 +1105,55 @@ elif selected_tab == "⚙️ Configurações":
                     {"e": r.email, "v": r.valor_hora, "s": str(r.senha), "a": bool(r.is_admin), "n": nm}
                 )
             s.commit()
-        st.success("Salvo!"); st.rerun()
+        st.success("Salvo!")
+        st.rerun()
         
     st.divider()
     
     st.write("📁 **Gestão de Projetos**")
-    ed_p = st.data_editor(df_projetos, num_rows="dynamic", hide_index=True)
+    ed_p = st.data_editor(
+        df_projetos, 
+        num_rows="dynamic", 
+        hide_index=True
+    )
+    
     if st.button("Salvar Projetos"):
         with conn.session as s:
             for r in ed_p.itertuples():
                 if r.nome: 
                     s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": r.nome})
             s.commit()
-        st.success("Salvo!"); st.rerun()
+        st.success("Salvo!")
+        st.rerun()
+
+    st.divider()
+    
+    st.write("🏦 **Dados Bancários**")
+    ed_b = st.data_editor(
+        df_bancos, 
+        num_rows="dynamic", 
+        hide_index=True, 
+        column_config={
+            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"])
+        }
+    )
+    
+    if st.button("Salvar Bancos"):
+        with conn.session as s:
+            for r in ed_b.itertuples():
+                tk = getattr(r, 'tipo_chave', 'CPF')
+                s.execute(
+                    text("""
+                        INSERT INTO dados_bancarios (colaborador_email, banco, tipo_chave, chave_pix) 
+                        VALUES (:e, :b, :t, :c) 
+                        ON CONFLICT (colaborador_email) 
+                        DO UPDATE SET banco=:b, tipo_chave=:t, chave_pix=:c
+                    """), 
+                    {"e": r.colaborador_email, "b": r.banco, "t": tk, "c": r.chave_pix}
+                )
+            s.commit()
+        st.success("Salvo!")
+        st.rerun()
 
 # ==============================================================================
 # RODAPÉ
@@ -1047,7 +1161,7 @@ elif selected_tab == "⚙️ Configurações":
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray; font-size: 12px;'>"
-    "OnCall Humana - Developed by Pedro Reis | v12.2 Infinity Stable | "
+    "OnCall Humana - Developed by Pedro Reis | v12.3 Infinity Stable | "
     f"Status: Online | {datetime.now().strftime('%d/%m/%Y %H:%M')}"
     "</p>", 
     unsafe_allow_html=True
