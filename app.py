@@ -812,6 +812,7 @@ elif selected_tab == "🧾 Notas Fiscais":
     
     if is_admin_session:
         # VISÃO ADMIN: Cobrar e Aprovar
+        st.markdown("### 🛠️ Painel da Administração")
         with st.expander("➕ Cobrar Nova Nota Fiscal", expanded=False):
             st.write("Solicite o envio de uma NF para um colaborador.")
             c_nf1, c_nf2 = st.columns(2)
@@ -828,7 +829,6 @@ elif selected_tab == "🧾 Notas Fiscais":
                     s.commit()
                 st.success("Solicitação criada com sucesso!"); time.sleep(1); st.rerun()
         
-        st.markdown("### 📋 Análise de NFs")
         if not df_invoices.empty:
             for r in df_invoices.itertuples():
                 nm_exibicao = email_to_name_map.get(r.collaborator_email, r.collaborator_email)
@@ -838,7 +838,6 @@ elif selected_tab == "🧾 Notas Fiscais":
                     if r.status == "Pendente de Aprovação":
                         st.info(f"Arquivo: {r.file_name}")
                         
-                        # Botão para baixar (Lê o BYTEA do banco sob demanda)
                         if st.button(f"📥 Baixar Arquivo NF", key=f"dl_{r.id}"):
                             with conn.session as s:
                                 res = s.execute(text("SELECT file_pdf FROM invoices WHERE id = :id"), {"id": r.id}).fetchone()
@@ -863,41 +862,46 @@ elif selected_tab == "🧾 Notas Fiscais":
         else:
             st.info("Nenhuma Nota Fiscal no sistema.")
             
-    else:
-        # VISÃO USUÁRIO: Enviar e Acompanhar
-        st.write("Suas Notas Fiscais pendentes de envio e histórico.")
-        my_nfs = df_invoices[df_invoices['collaborator_email'] == current_user_email]
-        
-        if not my_nfs.empty:
-            for r in my_nfs.itertuples():
-                with st.expander(f"[{r.status}] Competência: {r.competence}"):
-                    if r.status in ["Pendente de Envio", "Rejeitada"]:
-                        if r.status == "Rejeitada": 
-                            st.warning("Sua última NF enviada foi rejeitada. Por favor, reenvie.")
+        st.divider()
+
+    # ==========================================================
+    # VISÃO USUÁRIO: Enviar e Acompanhar (Visível para Admin e Users)
+    # ==========================================================
+    st.markdown("### 📤 Minhas Notas Fiscais (Área do Colaborador)")
+    st.write("Suas Notas Fiscais pendentes de envio e histórico.")
+    
+    my_nfs = df_invoices[df_invoices['collaborator_email'] == current_user_email]
+    
+    if not my_nfs.empty:
+        for r in my_nfs.itertuples():
+            with st.expander(f"[{r.status}] Competência: {r.competence}"):
+                if r.status in ["Pendente de Envio", "Rejeitada"]:
+                    if r.status == "Rejeitada": 
+                        st.warning("Sua última NF enviada foi rejeitada. Por favor, reenvie.")
+                    
+                    with st.form(f"form_nf_{r.id}"):
+                        valor_nf = st.number_input("Valor da NF (R$)", min_value=0.0, step=10.0, format="%.2f")
+                        pdf_file = st.file_uploader("Anexar PDF da NF", type=['pdf'])
                         
-                        with st.form(f"form_nf_{r.id}"):
-                            valor_nf = st.number_input("Valor da NF (R$)", min_value=0.0, step=10.0, format="%.2f")
-                            pdf_file = st.file_uploader("Anexar PDF da NF", type=['pdf'])
-                            
-                            if st.form_submit_button("📤 Enviar para Aprovação", type="primary"):
-                                if pdf_file and valor_nf > 0:
-                                    pdf_bytes = pdf_file.getvalue()
-                                    pdf_name = pdf_file.name
-                                    with conn.session as s:
-                                        s.execute(
-                                            text("UPDATE invoices SET amount=:v, file_name=:an, file_pdf=:ap, status='Pendente de Aprovação' WHERE id=:id"),
-                                            {"v": valor_nf, "an": pdf_name, "ap": pdf_bytes, "id": r.id}
-                                        )
-                                        s.commit()
-                                    st.success("Nota Fiscal enviada com sucesso!"); time.sleep(1); st.rerun()
-                                else:
-                                    st.error("Preencha o valor e anexe o PDF.")
-                    else:
-                        st.write(f"**Valor:** R$ {r.amount:,.2f}")
-                        st.write(f"**Arquivo Anexado:** {r.file_name}")
-                        st.success(f"Status: {r.status}")
-        else:
-            st.info("Você não possui requisições de Nota Fiscal.")
+                        if st.form_submit_button("📤 Enviar para Aprovação", type="primary"):
+                            if pdf_file and valor_nf > 0:
+                                pdf_bytes = pdf_file.getvalue()
+                                pdf_name = pdf_file.name
+                                with conn.session as s:
+                                    s.execute(
+                                        text("UPDATE invoices SET amount=:v, file_name=:an, file_pdf=:ap, status='Pendente de Aprovação' WHERE id=:id"),
+                                        {"v": valor_nf, "an": pdf_name, "ap": pdf_bytes, "id": r.id}
+                                    )
+                                    s.commit()
+                                st.success("Nota Fiscal enviada com sucesso!"); time.sleep(1); st.rerun()
+                            else:
+                                st.error("Preencha o valor e anexe o PDF.")
+                else:
+                    st.write(f"**Valor:** R$ {r.amount:,.2f}")
+                    st.write(f"**Arquivo Anexado:** {r.file_name}")
+                    st.success(f"Status: {r.status}")
+    else:
+        st.info("Você não possui requisições de Nota Fiscal no seu nome.")
 
 # ==============================================================================
 # ABA 6: PAGAMENTOS (DRILL-DOWN)
