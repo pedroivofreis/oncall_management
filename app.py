@@ -368,20 +368,19 @@ else:
 # ==============================================================================
 st.sidebar.divider()
 
-# Inicializa o estado da aba se não existir
+# 1. GARANTIA DE ESTADO: Inicializa a aba se não existir
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
 # --- BOTÃO DE ELITE: BI ESTRATÉGICO (SOMENTE ADMIN) ---
 if is_admin_session:
-    # Se clicar no botão, forçamos a aba de BI e damos um rerun
     if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True, type="primary"):
         st.session_state.selected_tab = "📈 BI Estratégico"
         st.rerun()
 
 st.sidebar.subheader("📍 Menu Principal")
 
-# Define as opções do menu rádio (sem o BI aqui para não duplicar)
+# 2. DEFINIÇÃO DAS OPÇÕES (BI removido da lista para evitar duplicidade)
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", 
@@ -401,30 +400,35 @@ else:
         "🧾 Notas Fiscais"
     ]
 
-# Lógica de sincronia: Se a aba atual for o BI, o rádio não deve "puxar" para outra aba
+# 3. LÓGICA DE SINCRONIA: Define qual índice o rádio deve mostrar
 try:
     if st.session_state.selected_tab == "📈 BI Estratégico":
-        # Se estamos no BI, o rádio fica na primeira opção mas não dispara mudança
-        idx_tab = 0 
+        idx_tab = 0 # Foca no topo, mas o conteúdo será o BI
     else:
         idx_tab = app_menu_options.index(st.session_state.selected_tab)
 except (ValueError, IndexError):
     idx_tab = 0
 
-selected_radio = st.sidebar.radio(
+# 4. CRIAÇÃO DA VARIÁVEL: Aqui resolvemos o NameError
+selected_tab_radio = st.sidebar.radio(
     "Ir para:", 
     app_menu_options, 
     index=idx_tab,
     key="main_radio_menu"
 )
 
-# Só altera o estado se o usuário clicar no rádio e não estivermos vindo do botão de BI
-if selected_radio != st.session_state.selected_tab:
-    # Se o usuário clicar em qualquer opção do rádio, ele sai do modo BI
-    st.session_state.selected_tab = selected_radio
+# Se o usuário mexer no rádio, atualizamos o estado (e saímos do BI se for o caso)
+if selected_tab_radio != st.session_state.selected_tab and st.session_state.selected_tab != "📈 BI Estratégico":
+    st.session_state.selected_tab = selected_tab_radio
+elif selected_tab_radio != st.session_state.selected_tab and st.session_state.selected_tab == "📈 BI Estratégico":
+    # Se estava no BI e clicou no rádio, o rádio ganha
+    st.session_state.selected_tab = selected_tab_radio
+
+# Atribuição final para o restante do código enxergar a aba correta
+selected_tab = st.session_state.selected_tab
 
 # Trava visual para o separador
-if st.session_state.selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
+if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
     st.sidebar.info("👆 Escolha uma das opções abaixo.")
     st.title("🔐 Área Administrativa")
     st.info("Selecione um dos módulos de gestão no menu lateral para continuar.")
