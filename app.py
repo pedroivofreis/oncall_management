@@ -1252,22 +1252,25 @@ elif selected_tab == "📈 BI Estratégico":
 elif selected_tab == "⚙️ Configurações":
     st.subheader("⚙️ Configurações do Sistema")
     
+    # --- GESTÃO DE USUÁRIOS ---
     st.write("👥 **Gestão de Usuários**")
     
     ed_u = st.data_editor(
         df_u_login, 
         num_rows="dynamic", 
         hide_index=True, 
+        key="usuarios_editor_fix", # Chave de estado para não perder o foco
         column_config={
-            "email": st.column_config.TextColumn("Login (Email)"),
+            "email": st.column_config.TextColumn("Login (Email)", required=True),
             "nome": st.column_config.TextColumn("Nome de Exibição"),
-            "senha": st.column_config.TextColumn("Senha (Texto)"),
-            "is_admin": st.column_config.CheckboxColumn("Admin"),
-            "valor_hora": st.column_config.NumberColumn("Valor Hora")
+            "senha": st.column_config.TextColumn("Senha (Texto)", required=True),
+            "is_admin": st.column_config.CheckboxColumn("Admin", default=False), # Evita erro de valor nulo
+            "valor_hora": st.column_config.NumberColumn("Valor Hora", default=0.0) # Evita erro de valor nulo
         }
     )
     
-    if st.button("Salvar Usuários"):
+    if st.button("Salvar Usuários", type="primary"):
+        count_u = 0
         with conn.session as s:
             for r in ed_u.itertuples():
                 # Validação para ignorar linhas totalmente vazias criadas sem querer
@@ -1278,6 +1281,11 @@ elif selected_tab == "⚙️ Configurações":
                 if pd.isna(nm) or str(nm).strip() == "": 
                     nm = str(r.email).split('@')[0]
                 
+                # Tratamento de nulos para não quebrar o banco
+                v_hora = float(r.valor_hora) if pd.notna(r.valor_hora) else 0.0
+                senha_str = str(r.senha) if pd.notna(r.senha) else "123mudar"
+                is_adm = bool(r.is_admin) if pd.notna(r.is_admin) else False
+                
                 s.execute(
                     text("""
                         INSERT INTO usuarios (email, valor_hora, senha, is_admin, nome) 
@@ -1285,10 +1293,73 @@ elif selected_tab == "⚙️ Configurações":
                         ON CONFLICT (email) 
                         DO UPDATE SET valor_hora=:v, senha=:s, is_admin=:a, nome=:n
                     """), 
-                    {"e": r.email, "v": r.valor_hora, "s": str(r.senha), "a": bool(r.is_admin), "n": nm}
+                    {"e": str(r.email).strip(), "v": v_hora, "s": senha_str, "a": is_adm, "n": nm}
+                )
+                count_u += 1
+            s.commit()
+        st.success(f"{count_u} usuários atualizados com sucesso!")
+        time.sleep(1)
+        st.rerun()
+        
+    st.divider()
+    
+    # --- GESTÃO DE PROJETOS ---
+    st.write("📁 **Gestão de Projetos**")
+    
+    ed_p = st.data_editor(
+        df_projetos, 
+        num_rows="dynamic", 
+        hide_index=True,
+        key="projetos_editor_fix"
+    )
+    
+    if st.button("Salvar Projetos"):
+        with conn.session as s:
+            for r in ed_p.itertuples():
+                if pd.notna(r.nome) and str(r.nome).strip() != "": 
+                    s.execute(text("INSERT INTO projetos (nome) VALUES (:n) ON CONFLICT (nome) DO NOTHING"), {"n": str(r.nome).strip()})
+            s.commit()
+        st.success("Projetos salvos com sucesso!")
+        time.sleep(1)
+        st.rerun()
+
+    st.divider()
+    
+    # --- DADOS BANCÁRIOS ---
+    st.write("🏦 **Dados Bancários**")
+    
+    ed_b = st.data_editor(
+        df_bancos, 
+        num_rows="dynamic", 
+        hide_index=True,
+        key="bancos_editor_fix",
+        column_config={
+            "tipo_chave": st.column_config.SelectboxColumn("Tipo", options=["CPF", "CNPJ", "Email", "Aleatoria", "Agencia/Conta"], required=True)
+        }
+    )
+    
+    if st.button("Salvar Bancos"):
+        with conn.session as s:
+            for r in ed_b.itertuples():
+                if pd.isna(r.colaborador_email) or str(r.colaborador_email).strip() == "":
+                    continue
+                    
+                tk = getattr(r, 'tipo_chave', 'CPF')
+                c_pix = getattr(r, 'chave_pix', '') if pd.notna(getattr(r, 'chave_pix', '')) else ''
+                banco_val = getattr(r, 'banco', '') if pd.notna(getattr(r, 'banco', '')) else ''
+                
+                s.execute(
+                    text("""
+                        INSERT INTO dados_bancarios (colaborador_email, banco, tipo_chave, chave_pix) 
+                        VALUES (:e, :b, :t, :c) 
+                        ON CONFLICT (colaborador_email) 
+                        DO UPDATE SET banco=:b, tipo_chave=:t, chave_pix=:c
+                    """), 
+                    {"e": str(r.colaborador_email).strip(), "b": banco_val, "t": tk, "c": c_pix}
                 )
             s.commit()
-        st.success("Usuários salvos com sucesso!")
+        st.success("Dados bancários salvos com sucesso!")
+        time.sleep(1)
         st.rerun()
         
     st.divider()
