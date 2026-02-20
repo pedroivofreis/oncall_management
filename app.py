@@ -638,14 +638,18 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
             st.info("Nenhum registro encontrado para as competências selecionadas.")
 
 # ==============================================================================
-# ABA 4: ADMIN APROVAÇÕES
+# ABA 4: ADMIN APROVAÇÕES E IMPORTAÇÃO BLINDADA
 # ==============================================================================
 elif selected_tab == "🛡️ Admin Aprovações":
     st.subheader("🛡️ Central de Gestão Operacional")
     
-    # --- BLOCO A: IMPORTAÇÃO EM MASSA VIA XLSX ---
-    with st.expander("📥 Importação em Massa (XLSX)", expanded=False):
-        st.info("Faça o upload da planilha e mapeie as colunas com os campos do sistema. A competência será gerada automaticamente.")
+    # --- BLOCO A: IMPORTAÇÃO EM MASSA (DUPLA OPÇÃO) ---
+    st.markdown("### 📥 Importação em Massa")
+    tab_xlsx, tab_texto = st.tabs(["📊 Importar Planilha (XLSX)", "📋 Copiar e Colar (Texto)"])
+
+    # OPÇÃO 1: UPLOAD DE PLANILHA
+    with tab_xlsx:
+        st.info("Faça o upload da planilha e mapeie as colunas. A competência será gerada automaticamente.")
         uploaded_file = st.file_uploader("Upload de Lançamentos", type=['xlsx', 'xls'])
         
         if uploaded_file is not None:
@@ -664,10 +668,10 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 map_tipo = c_mp5.selectbox("Tipo de Atividade", cols_opcoes, index=0)
                 map_desc = c_mp6.selectbox("Descrição *", cols_opcoes, index=0)
                 
-                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada para evitar que o sistema salve em meses incorretos.")
+                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada.")
                 corrigir_inversao = st.checkbox("🔄 Corrigir Inversão de Dia/Mês automática do Excel", value=True)
                 
-                if st.button("🚀 Executar Importação", type="primary"):
+                if st.button("🚀 Executar Importação XLSX", type="primary"):
                     valid = all(v != "-- Selecione --" for v in [map_data, map_email, map_proj, map_horas, map_desc])
                     if not valid:
                         st.error("Mapeie todas as colunas obrigatórias sinalizadas com asterisco (*).")
@@ -675,10 +679,8 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         count_imported = 0
                         with conn.session as s:
                             for idx, r in df_import.iterrows():
-                                # === PARSER DE DATA INTELIGENTE (VACINA EXCEL) ===
                                 try:
                                     dt_val = r[map_data]
-                                    
                                     if isinstance(dt_val, str):
                                         dt_str = str(dt_val).strip().split(" ")[0]
                                         dt_obj = pd.to_datetime(dt_str, dayfirst=True)
@@ -687,21 +689,16 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                         
                                     if corrigir_inversao:
                                         try:
-                                            # A mágica: Tenta destrocar o dia pelo mês.
-                                            # Se for 18/02, o sistema leu como 2026-02-18. Ao trocar (mês 18, dia 2), dá erro e ele ignora (mantendo correto).
-                                            # Se for 04/01, o sistema leu como 2026-04-01. Ao trocar (mês 1, dia 4), ele corrige para 2026-01-04!
                                             dt_obj = dt_obj.replace(day=dt_obj.month, month=dt_obj.day)
                                         except ValueError:
                                             pass
                                             
                                     comp_str = dt_obj.strftime("%Y-%m")
                                     data_full = dt_obj.strftime("%Y-%m-%d")
-                                    
                                 except Exception as e:
                                     now = datetime.now()
                                     comp_str = now.strftime("%Y-%m")
                                     data_full = now.strftime("%Y-%m-%d")
-                                # ==================================================
                                 
                                 email_colab = str(r[map_email]).strip()
                                 v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
@@ -719,14 +716,58 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                     }
                                 )
                                 count_imported += 1
-                                
                             s.commit()
-                        
                         st.success(f"{count_imported} registros importados com sucesso!")
-                        time.sleep(1.5)
-                        st.rerun()
+                        time.sleep(1.5); st.rerun()
             except Exception as e:
                 st.error(f"Erro ao ler arquivo: {e}")
+
+    # OPÇÃO 2: COPIA E COLA TEXTO
+    with tab_texto:
+        st.info("O sistema identificará a data automaticamente (DD/MM/AAAA).")
+        st.write("**Ordem obrigatória das colunas:** Data | Projeto | Email | Horas | Tipo | Descrição")
+        cola_texto = st.text_area("Cole os dados do Excel aqui (separados por colunas):", height=150)
+        
+        if cola_texto and st.button("🚀 Processar Texto", type="primary"):
+            try:
+                # Lê o texto colado como se fosse um arquivo separado por Tabulação (padrão do copy-paste do Excel)
+                df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "h", "t", "d"])
+                count_imported = 0
+                
+                with conn.session as s:
+                    for r in df_p.itertuples():
+                        email_colab = str(r.e).strip()
+                        v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
+                        
+                        # Tratamento Data Padrão BR para o texto
+                        try:
+                            dt_str = str(r.data).strip().split(" ")[0]
+                            dt_obj = pd.to_datetime(dt_str, dayfirst=True)
+                            comp_str = dt_obj.strftime("%Y-%m")
+                            data_full = dt_obj.strftime("%Y-%m-%d")
+                        except:
+                            now = datetime.now()
+                            comp_str = now.strftime("%Y-%m")
+                            data_full = now.strftime("%Y-%m-%d")
+
+                        s.execute(
+                            text("""
+                                INSERT INTO lancamentos 
+                                (id, colaborador_email, projeto, horas, competencia, data_atividade, tipo, descricao, valor_hora_historico, status_aprovaca, foi_editado) 
+                                VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, 'Pendente', FALSE)
+                            """),
+                            {
+                                "id": str(uuid.uuid4()), "e": email_colab, "p": r.p, "h": float(r.h), 
+                                "c": comp_str, "d_atv": data_full, "t": r.t, "d": r.d, "v": v_h
+                            }
+                        )
+                        count_imported += 1
+                    s.commit()
+                st.success(f"{count_imported} registros colados e importados com sucesso!")
+                time.sleep(1.5); st.rerun()
+            except Exception as e:
+                st.error("Erro na leitura do texto. Verifique se copiou na ordem correta e se não tem colunas vazias.")
+                st.code(str(e))
 
     st.divider()
     
