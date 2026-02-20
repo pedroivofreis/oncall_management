@@ -663,9 +663,9 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
 elif selected_tab == "🛡️ Admin Aprovações":
     st.subheader("🛡️ Central de Gestão Operacional")
     
-    # --- BLOCO A: IMPORTAÇÃO EM MASSA (DUPLA OPÇÃO) ---
-    st.markdown("### 📥 Importação em Massa")
-    tab_xlsx, tab_texto = st.tabs(["📊 Importar Planilha (XLSX)", "📋 Copiar e Colar (Texto)"])
+    # --- BLOCO A: INSERÇÃO DE DADOS (ADMIN) ---
+    st.markdown("### 📥 Inserção de Dados (Em Massa ou Individual)")
+    tab_xlsx, tab_texto, tab_indiv = st.tabs(["📊 Importar Planilha (XLSX)", "📋 Copiar e Colar (Texto)", "👤 Lançamento Individual"])
 
     # OPÇÃO 1: UPLOAD DE PLANILHA
     with tab_xlsx:
@@ -688,7 +688,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 map_tipo = c_mp5.selectbox("Tipo de Atividade", cols_opcoes, index=0)
                 map_desc = c_mp6.selectbox("Descrição *", cols_opcoes, index=0)
                 
-                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada.")
+                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada para evitar que o sistema salve em meses incorretos.")
                 corrigir_inversao = st.checkbox("🔄 Corrigir Inversão de Dia/Mês automática do Excel", value=True)
                 
                 if st.button("🚀 Executar Importação XLSX", type="primary"):
@@ -745,13 +745,11 @@ elif selected_tab == "🛡️ Admin Aprovações":
     # OPÇÃO 2: COPIA E COLA TEXTO
     with tab_texto:
         st.info("O sistema identificará a data automaticamente (DD/MM/AAAA).")
-        # Texto ajustado para a ordem real da sua planilha
         st.write("**Ordem obrigatória das colunas:** Data | Projeto | Email | Tipo | Horas | Descrição")
         cola_texto = st.text_area("Cole os dados do Excel aqui (separados por colunas):", height=150)
         
         if cola_texto and st.button("🚀 Processar Texto", type="primary"):
             try:
-                # MÁGICA AQUI: Invertemos o "t" e o "h" para ler "Tipo" antes de "Horas"
                 df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "t", "h", "d"])
                 count_imported = 0
                 
@@ -760,7 +758,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         email_colab = str(r.e).strip()
                         v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
                         
-                        # Tratamento Data Padrão BR para o texto
                         try:
                             dt_str = str(r.data).strip().split(" ")[0]
                             dt_obj = pd.to_datetime(dt_str, dayfirst=True)
@@ -789,6 +786,58 @@ elif selected_tab == "🛡️ Admin Aprovações":
             except Exception as e:
                 st.error("Erro na leitura do texto. Verifique se copiou na ordem correta e se não tem colunas vazias.")
                 st.code(str(e))
+
+    # OPÇÃO 3: LANÇAMENTO INDIVIDUAL (ADMIN)
+    with tab_indiv:
+        st.info("Insira um lançamento manualmente para um colaborador. O histórico e o valor hora serão vinculados a ele.")
+        
+        with st.form("form_lancamento_admin", clear_on_submit=True):
+            c0, c1, c2 = st.columns(3)
+            # Admin escolhe quem é a pessoa
+            target_user_visual = c0.selectbox("👤 Colaborador Alvo", opcoes_visuais_login)
+            input_projeto = c1.selectbox("Projeto", lista_projetos_ativos)
+            input_tipo = c2.selectbox("Tipo de Atividade", ["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio"])
+            
+            c3, c4, c5 = st.columns([1, 1, 2])
+            input_data = c3.date_input("Data REAL da Atividade", datetime.now())
+            input_horas = c4.number_input("Horas (HH.MM)", min_value=0.0, step=0.10, format="%.2f")
+            input_desc = c5.text_input("Descrição Detalhada")
+            
+            # Admin tem o poder de já mandar Aprovado
+            status_inicial = st.selectbox("Status do Lançamento", ["Aprovado", "Pendente"], index=0)
+            
+            if st.form_submit_button("🚀 Gravar Lançamento Individual", type="primary"):
+                if input_horas > 0 and input_desc:
+                    try:
+                        # Extrai o e-mail real da string visual do selectbox
+                        target_email = login_visual_map[target_user_visual]
+                        
+                        competencia_str = input_data.strftime("%Y-%m")
+                        data_full_str = input_data.strftime("%Y-%m-%d")
+                        valor_hora_alvo = auth_db[target_email]["valor_hora"]
+                        
+                        with conn.session as s:
+                            s.execute(
+                                text("""
+                                    INSERT INTO lancamentos 
+                                    (id, colaborador_email, projeto, horas, competencia, data_atividade, tipo, descricao, valor_hora_historico, status_aprovaca, foi_editado) 
+                                    VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, :st, FALSE)
+                                """),
+                                {
+                                    "id": str(uuid.uuid4()), "e": target_email, "p": input_projeto, "h": input_horas, 
+                                    "c": competencia_str, "d_atv": data_full_str, "t": input_tipo, "d": input_desc, 
+                                    "v": valor_hora_alvo, "st": status_inicial
+                                }
+                            )
+                            s.commit()
+                        st.success(f"✅ Lançamento inserido com sucesso para {target_email}!")
+                        time.sleep(1.5); st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar: {e}")
+                else:
+                    st.warning("⚠️ Preencha as horas (> 0) e a descrição.")
+
+    
     st.divider()
     
     # --- BLOCO B: PENDENTES ---
