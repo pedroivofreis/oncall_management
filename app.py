@@ -1176,7 +1176,7 @@ elif selected_tab == "💸 Pagamentos":
             df_pago = df_pay[df_pay['status_pagamento'] == 'Pago']
             
             c1.metric("🔴 Em Aberto", f"R$ {df_aberto['r$'].sum():,.2f}", f"{df_aberto['horas'].sum():.2f}h", delta_color="off")
-            c2.metric("🔵 Liberado", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
+            c2.metric("🔵 Liberado para Pagamento", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
             c3.metric("🟡 Parcial", f"R$ {df_parcial['r$'].sum():,.2f}", f"{df_parcial['horas'].sum():.2f}h", delta_color="off")
             c4.metric("🟢 Pago", f"R$ {df_pago['r$'].sum():,.2f}", f"{df_pago['horas'].sum():.2f}h", delta_color="off")
             
