@@ -664,6 +664,9 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 map_tipo = c_mp5.selectbox("Tipo de Atividade", cols_opcoes, index=0)
                 map_desc = c_mp6.selectbox("Descrição *", cols_opcoes, index=0)
                 
+                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada para evitar que o sistema salve em meses incorretos.")
+                corrigir_inversao = st.checkbox("🔄 Corrigir Inversão de Dia/Mês automática do Excel", value=True)
+                
                 if st.button("🚀 Executar Importação", type="primary"):
                     valid = all(v != "-- Selecione --" for v in [map_data, map_email, map_proj, map_horas, map_desc])
                     if not valid:
@@ -672,27 +675,33 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         count_imported = 0
                         with conn.session as s:
                             for idx, r in df_import.iterrows():
-                                # === PARSER DE DATA (CORRIGIDO) ===
+                                # === PARSER DE DATA INTELIGENTE (VACINA EXCEL) ===
                                 try:
                                     dt_val = r[map_data]
                                     
-                                    # Se a data já veio como Date/Timestamp do Excel, deixa quieta!
-                                    if isinstance(dt_val, (pd.Timestamp, datetime, date)):
-                                        dt_obj = pd.to_datetime(dt_val)
-                                    else:
-                                        # Se veio como Texto, garante a leitura como Dia/Mês/Ano
+                                    if isinstance(dt_val, str):
                                         dt_str = str(dt_val).strip().split(" ")[0]
                                         dt_obj = pd.to_datetime(dt_str, dayfirst=True)
+                                    else:
+                                        dt_obj = pd.to_datetime(dt_val)
                                         
+                                    if corrigir_inversao:
+                                        try:
+                                            # A mágica: Tenta destrocar o dia pelo mês.
+                                            # Se for 18/02, o sistema leu como 2026-02-18. Ao trocar (mês 18, dia 2), dá erro e ele ignora (mantendo correto).
+                                            # Se for 04/01, o sistema leu como 2026-04-01. Ao trocar (mês 1, dia 4), ele corrige para 2026-01-04!
+                                            dt_obj = dt_obj.replace(day=dt_obj.month, month=dt_obj.day)
+                                        except ValueError:
+                                            pass
+                                            
                                     comp_str = dt_obj.strftime("%Y-%m")
                                     data_full = dt_obj.strftime("%Y-%m-%d")
                                     
                                 except Exception as e:
-                                    # Em caso de linha zoada na planilha, usa a data de hoje para não travar
                                     now = datetime.now()
                                     comp_str = now.strftime("%Y-%m")
                                     data_full = now.strftime("%Y-%m-%d")
-                                # ==================================
+                                # ==================================================
                                 
                                 email_colab = str(r[map_email]).strip()
                                 v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
