@@ -672,35 +672,27 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         count_imported = 0
                         with conn.session as s:
                             for idx, r in df_import.iterrows():
-                                # === CORREÇÃO BLINDADA DE DATA (PADRÃO BRASIL) ===
+                                # === PARSER DE DATA (CORRIGIDO) ===
                                 try:
                                     dt_val = r[map_data]
                                     
-                                    # Se o Excel já mandou como formato de Data nativo
+                                    # Se a data já veio como Date/Timestamp do Excel, deixa quieta!
                                     if isinstance(dt_val, (pd.Timestamp, datetime, date)):
                                         dt_obj = pd.to_datetime(dt_val)
                                     else:
-                                        # Se veio como Texto/String, forçamos o padrão BR
-                                        dt_str = str(dt_val).strip().split(" ")[0] # Pega só a data
-                                        try:
-                                            # Tenta formato DD/MM/AAAA (ex: 12/01/2026)
-                                            dt_obj = datetime.strptime(dt_str, "%d/%m/%Y")
-                                        except ValueError:
-                                            try:
-                                                # Tenta formato DD/MM/AA (ex: 12/01/26)
-                                                dt_obj = datetime.strptime(dt_str, "%d/%m/%y")
-                                            except ValueError:
-                                                # Último recurso: Deixa o pandas tentar entender (forçando dia primeiro)
-                                                dt_obj = pd.to_datetime(dt_str, dayfirst=True)
-                                    
+                                        # Se veio como Texto, garante a leitura como Dia/Mês/Ano
+                                        dt_str = str(dt_val).strip().split(" ")[0]
+                                        dt_obj = pd.to_datetime(dt_str, dayfirst=True)
+                                        
                                     comp_str = dt_obj.strftime("%Y-%m")
                                     data_full = dt_obj.strftime("%Y-%m-%d")
+                                    
                                 except Exception as e:
-                                    # Se a célula estiver vazia ou com lixo, usa a data de hoje para não travar
+                                    # Em caso de linha zoada na planilha, usa a data de hoje para não travar
                                     now = datetime.now()
                                     comp_str = now.strftime("%Y-%m")
                                     data_full = now.strftime("%Y-%m-%d")
-                                # ==================================================
+                                # ==================================
                                 
                                 email_colab = str(r[map_email]).strip()
                                 v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
@@ -719,7 +711,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                 )
                                 count_imported += 1
                                 
-                            # O Commit agora está no lugar certinho para salvar!
                             s.commit()
                         
                         st.success(f"{count_imported} registros importados com sucesso!")
