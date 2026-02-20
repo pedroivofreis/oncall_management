@@ -368,20 +368,20 @@ else:
 # ==============================================================================
 st.sidebar.divider()
 
-# Inicializa o estado se não existir
+# Inicializa o estado mestre
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
 # --- BOTÃO MINIMALISTA: BI ESTRATÉGICO (SOMENTE ADMIN) ---
+# Aqui usamos um gatilho temporário
+btn_bi = False
 if is_admin_session:
-    # Estilo discreto: sem fundo azul, apenas borda (conforme seu pedido)
+    # Estilo discreto conforme solicitado
     if st.sidebar.button("📈 DASHBOARD ESTRATÉGICO", use_container_width=True):
-        st.session_state.selected_tab = "📈 BI Estratégico"
-        st.rerun()
+        btn_bi = True
 
 st.sidebar.subheader("📍 Menu Principal")
 
-# Define as opções
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", "🗂️ Histórico Pessoal", "🧾 Notas Fiscais",
@@ -391,33 +391,21 @@ if is_admin_session:
 else:
     app_menu_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "📊 Meu Painel", "🧾 Notas Fiscais"]
 
-# LÓGICA INFALÍVEL: 
-# Se a aba atual for o BI, o rádio não pode forçar o índice. 
-# Usamos o parâmetro 'index' dinâmico e uma 'key' que muda quando entramos no BI.
-try:
-    if st.session_state.selected_tab in app_menu_options:
-        current_idx = app_menu_options.index(st.session_state.selected_tab)
-    else:
-        current_idx = 0 # Fallback se estiver no BI
-except:
-    current_idx = 0
-
-# A 'key' do rádio agora é vinculada à aba selecionada. 
-# Se a aba mudar via botão, o rádio é forçado a se reconstruir.
+# O rádio funciona independente
 selected_radio = st.sidebar.radio(
     "Ir para:", 
     app_menu_options, 
-    index=current_idx,
-    key=f"menu_radio_{st.session_state.selected_tab}" 
+    index=app_menu_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in app_menu_options else 0
 )
 
-# Atualiza o estado global
-if selected_radio != st.session_state.selected_tab:
+# --- A MÁGICA DA PRECEDÊNCIA ---
+# Se o botão foi clicado, ele SOBRESCREVE o rádio nesta rodada.
+if btn_bi:
+    selected_tab = "📈 BI Estratégico"
+    st.session_state.selected_tab = "📈 BI Estratégico"
+else:
+    selected_tab = selected_radio
     st.session_state.selected_tab = selected_radio
-    st.rerun()
-
-# Variável para o restante do código
-selected_tab = st.session_state.selected_tab
 
 # Trava visual para o separador
 if selected_tab == "➖➖ 🔐 ÁREA ADMIN ➖➖":
