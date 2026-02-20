@@ -1132,80 +1132,90 @@ elif selected_tab == "🧾 Notas Fiscais":
 elif selected_tab == "💸 Pagamentos":
     st.subheader("💸 Consolidação Financeira")
     
-    df_pay = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
+    # Puxa os dados base (apenas aprovados)
+    df_pay_base = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
     
-    if not df_pay.empty:
-        df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
-        df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
+    if not df_pay_base.empty:
+        # --- NOVO FILTRO DE COMPETÊNCIA ---
+        all_comps_pay = sorted(df_pay_base['competencia'].astype(str).unique(), reverse=True)
+        comp_sel_pay = st.multiselect(
+            "📅 Filtrar Competência(s):", 
+            all_comps_pay, 
+            default=all_comps_pay[:1] if all_comps_pay else None,
+            key="filtro_comp_pagamentos"
+        )
         
-        # --- NOVOS SCORECARDS VISUAIS ---
-        st.markdown("### 📊 Resumo por Status")
-        c1, c2, c3, c4 = st.columns(4)
-        
-        # Filtra os dados de cada status
-        df_aberto = df_pay[df_pay['status_pagamento'] == 'Em aberto']
-        df_liberado = df_pay[df_pay['status_pagamento'] == 'Liberado para pagamento']
-        df_parcial = df_pay[df_pay['status_pagamento'] == 'Parcial']
-        df_pago = df_pay[df_pay['status_pagamento'] == 'Pago']
-        
-        # Cria os cards (O delta_color="off" deixa a hora em cinza)
-        c1.metric("🔴 Em Aberto", f"R$ {df_aberto['r$'].sum():,.2f}", f"{df_aberto['horas'].sum():.2f}h", delta_color="off")
-        c2.metric("🔵 Liberado", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
-        c3.metric("🟡 Parcial", f"R$ {df_parcial['r$'].sum():,.2f}", f"{df_parcial['horas'].sum():.2f}h", delta_color="off")
-        c4.metric("🟢 Pago", f"R$ {df_pago['r$'].sum():,.2f}", f"{df_pago['horas'].sum():.2f}h", delta_color="off")
-        
-        st.divider()
-        # --------------------------------
-        
-        df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({'r$': 'sum', 'horas': 'sum'}).reset_index()
-        df_g = df_g.sort_values(['competencia'], ascending=False)
-        
-        for idx, row in df_g.iterrows():
-            nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
+        # Aplica o filtro selecionado
+        if comp_sel_pay:
+            df_pay = df_pay_base[df_pay_base['competencia'].isin(comp_sel_pay)].copy()
+        else:
+            df_pay = pd.DataFrame() # Esvazia se nada for selecionado
             
-            # 1. Filtra os detalhes PRIMEIRO para descobrir o status do grupo
-            det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
-            s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns and not det.empty else "Em aberto"
+        if not df_pay.empty:
+            df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
+            df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
             
-            # 2. Define a label colorida baseada no status
-            if s_at == "Pago":
-                badge = "🟢 PAGO"
-            elif s_at == "Liberado para pagamento":
-                badge = "🔵 LIBERADO"
-            elif s_at == "Parcial":
-                badge = "🟡 PARCIAL"
-            else:
-                badge = "🔴 EM ABERTO"
+            # --- SCORECARDS VISUAIS ---
+            st.markdown("### 📊 Resumo por Status")
+            c1, c2, c3, c4 = st.columns(4)
             
-            # 3. Adiciona a badge visual direto no título do Drill-Down
-            with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
+            df_aberto = df_pay[df_pay['status_pagamento'] == 'Em aberto']
+            df_liberado = df_pay[df_pay['status_pagamento'] == 'Liberado para pagamento']
+            df_parcial = df_pay[df_pay['status_pagamento'] == 'Parcial']
+            df_pago = df_pay[df_pay['status_pagamento'] == 'Pago']
+            
+            c1.metric("🔴 Em Aberto", f"R$ {df_aberto['r$'].sum():,.2f}", f"{df_aberto['horas'].sum():.2f}h", delta_color="off")
+            c2.metric("🔵 Liberado", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
+            c3.metric("🟡 Parcial", f"R$ {df_parcial['r$'].sum():,.2f}", f"{df_parcial['horas'].sum():.2f}h", delta_color="off")
+            c4.metric("🟢 Pago", f"R$ {df_pago['r$'].sum():,.2f}", f"{df_pago['horas'].sum():.2f}h", delta_color="off")
+            
+            st.divider()
+            # --------------------------------
+            
+            df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({'r$': 'sum', 'horas': 'sum'}).reset_index()
+            df_g = df_g.sort_values(['competencia'], ascending=False)
+            
+            for idx, row in df_g.iterrows():
+                nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
                 
-                st.dataframe(
-                    det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']],
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config={
-                        "r$": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                        "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
-                    }
-                )
+                det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
+                s_at = det['status_pagamento'].iloc[0] if 'status_pagamento' in det.columns and not det.empty else "Em aberto"
                 
-                ops = ["Em aberto", "Liberado para pagamento", "Parcial", "Pago"]
-                ix = ops.index(s_at) if s_at in ops else 0
+                if s_at == "Pago": badge = "🟢 PAGO"
+                elif s_at == "Liberado para pagamento": badge = "🔵 LIBERADO"
+                elif s_at == "Parcial": badge = "🟡 PARCIAL"
+                else: badge = "🔴 EM ABERTO"
                 
-                c1, c2 = st.columns([3, 1])
-                ns = c1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
-                
-                if c2.button("Atualizar Pagamento", key=f"b_{idx}"):
-                    with conn.session as s:
-                        ids_u = tuple(det['id'].tolist())
-                        s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
-                        s.commit()
-                    st.toast("Status atualizado!")
-                    time.sleep(0.5)
-                    st.rerun()
+                with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
+                    
+                    st.dataframe(
+                        det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']],
+                        use_container_width=True, 
+                        hide_index=True,
+                        column_config={
+                            "r$": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                            "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+                        }
+                    )
+                    
+                    ops = ["Em aberto", "Liberado para pagamento", "Parcial", "Pago"]
+                    ix = ops.index(s_at) if s_at in ops else 0
+                    
+                    c1, c2 = st.columns([3, 1])
+                    ns = c1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
+                    
+                    if c2.button("Atualizar Pagamento", key=f"b_{idx}"):
+                        with conn.session as s:
+                            ids_u = tuple(det['id'].tolist())
+                            s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
+                            s.commit()
+                        st.toast("Status atualizado!")
+                        time.sleep(0.5)
+                        st.rerun()
+        else:
+            st.info("👆 Selecione pelo menos uma competência acima para visualizar os pagamentos.")
     else:
-        st.info("Nenhum lançamento aprovado.")
+        st.info("Nenhum lançamento aprovado no sistema.")
 
 # ==============================================================================
 # ABA 7: BI ESTRATÉGICO
