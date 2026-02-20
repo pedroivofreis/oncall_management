@@ -745,13 +745,14 @@ elif selected_tab == "🛡️ Admin Aprovações":
     # OPÇÃO 2: COPIA E COLA TEXTO
     with tab_texto:
         st.info("O sistema identificará a data automaticamente (DD/MM/AAAA).")
-        st.write("**Ordem obrigatória das colunas:** Data | Projeto | Email | Horas | Tipo | Descrição")
+        # Texto ajustado para a ordem real da sua planilha
+        st.write("**Ordem obrigatória das colunas:** Data | Projeto | Email | Tipo | Horas | Descrição")
         cola_texto = st.text_area("Cole os dados do Excel aqui (separados por colunas):", height=150)
         
         if cola_texto and st.button("🚀 Processar Texto", type="primary"):
             try:
-                # Lê o texto colado como se fosse um arquivo separado por Tabulação (padrão do copy-paste do Excel)
-                df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "h", "t", "d"])
+                # MÁGICA AQUI: Invertemos o "t" e o "h" para ler "Tipo" antes de "Horas"
+                df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "t", "h", "d"])
                 count_imported = 0
                 
                 with conn.session as s:
@@ -788,7 +789,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
             except Exception as e:
                 st.error("Erro na leitura do texto. Verifique se copiou na ordem correta e se não tem colunas vazias.")
                 st.code(str(e))
-
     st.divider()
     
     # --- BLOCO B: PENDENTES ---
