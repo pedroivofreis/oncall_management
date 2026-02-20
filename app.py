@@ -665,13 +665,14 @@ elif selected_tab == "🛡️ Admin Aprovações":
     
     # --- BLOCO A: INSERÇÃO DE DADOS (ADMIN) ---
     st.markdown("### 📥 Inserção de Dados (Em Massa ou Individual)")
-    tab_xlsx, tab_texto, tab_indiv = st.tabs(["📊 Importar Planilha (XLSX)", "📋 Copiar e Colar (Texto)", "👤 Lançamento Individual"])
+    
+    # 1. ADICIONADA A 4ª ABA PARA CUSTOS
+    tab_xlsx, tab_texto, tab_indiv, tab_custo = st.tabs(["📊 Importar Planilha (XLSX)", "📋 Copiar e Colar (Texto)", "👤 Lançamento Individual", "💰 Inserir Custo"])
 
     # OPÇÃO 1: UPLOAD DE PLANILHA
     with tab_xlsx:
         st.info("Faça o upload da planilha e mapeie as colunas. A competência será gerada automaticamente.")
         uploaded_file = st.file_uploader("Upload de Lançamentos", type=['xlsx', 'xls'])
-        
         if uploaded_file is not None:
             try:
                 df_import = pd.read_excel(uploaded_file)
@@ -688,7 +689,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 map_tipo = c_mp5.selectbox("Tipo de Atividade", cols_opcoes, index=0)
                 map_desc = c_mp6.selectbox("Descrição *", cols_opcoes, index=0)
                 
-                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada para evitar que o sistema salve em meses incorretos.")
+                st.warning("⚠️ **Dica:** Se as datas da sua planilha estiverem formatadas como Dia/Mês (Padrão BR), mantenha a caixa abaixo marcada.")
                 corrigir_inversao = st.checkbox("🔄 Corrigir Inversão de Dia/Mês automática do Excel", value=True)
                 
                 if st.button("🚀 Executar Importação XLSX", type="primary"):
@@ -747,17 +748,14 @@ elif selected_tab == "🛡️ Admin Aprovações":
         st.info("O sistema identificará a data automaticamente (DD/MM/AAAA).")
         st.write("**Ordem obrigatória das colunas:** Data | Projeto | Email | Tipo | Horas | Descrição")
         cola_texto = st.text_area("Cole os dados do Excel aqui (separados por colunas):", height=150)
-        
         if cola_texto and st.button("🚀 Processar Texto", type="primary"):
             try:
                 df_p = pd.read_csv(io.StringIO(cola_texto), sep='\t', names=["data", "p", "e", "t", "h", "d"])
                 count_imported = 0
-                
                 with conn.session as s:
                     for r in df_p.itertuples():
                         email_colab = str(r.e).strip()
                         v_h = auth_db.get(email_colab, {}).get("valor_hora", 0)
-                        
                         try:
                             dt_str = str(r.data).strip().split(" ")[0]
                             dt_obj = pd.to_datetime(dt_str, dayfirst=True)
@@ -784,16 +782,13 @@ elif selected_tab == "🛡️ Admin Aprovações":
                 st.success(f"{count_imported} registros colados e importados com sucesso!")
                 time.sleep(1.5); st.rerun()
             except Exception as e:
-                st.error("Erro na leitura do texto. Verifique se copiou na ordem correta e se não tem colunas vazias.")
-                st.code(str(e))
+                st.error("Erro na leitura do texto. Verifique se copiou na ordem correta.")
 
     # OPÇÃO 3: LANÇAMENTO INDIVIDUAL (ADMIN)
     with tab_indiv:
-        st.info("Insira um lançamento manualmente para um colaborador. O histórico e o valor hora serão vinculados a ele.")
-        
+        st.info("Insira um lançamento manualmente para um colaborador.")
         with st.form("form_lancamento_admin", clear_on_submit=True):
             c0, c1, c2 = st.columns(3)
-            # Admin escolhe quem é a pessoa
             target_user_visual = c0.selectbox("👤 Colaborador Alvo", opcoes_visuais_login)
             input_projeto = c1.selectbox("Projeto", lista_projetos_ativos)
             input_tipo = c2.selectbox("Tipo de Atividade", ["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio"])
@@ -802,16 +797,12 @@ elif selected_tab == "🛡️ Admin Aprovações":
             input_data = c3.date_input("Data REAL da Atividade", datetime.now())
             input_horas = c4.number_input("Horas (HH.MM)", min_value=0.0, step=0.10, format="%.2f")
             input_desc = c5.text_input("Descrição Detalhada")
-            
-            # Admin tem o poder de já mandar Aprovado
             status_inicial = st.selectbox("Status do Lançamento", ["Aprovado", "Pendente"], index=0)
             
             if st.form_submit_button("🚀 Gravar Lançamento Individual", type="primary"):
                 if input_horas > 0 and input_desc:
                     try:
-                        # Extrai o e-mail real da string visual do selectbox
                         target_email = login_visual_map[target_user_visual]
-                        
                         competencia_str = input_data.strftime("%Y-%m")
                         data_full_str = input_data.strftime("%Y-%m-%d")
                         valor_hora_alvo = auth_db[target_email]["valor_hora"]
@@ -830,14 +821,62 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                 }
                             )
                             s.commit()
-                        st.success(f"✅ Lançamento inserido com sucesso para {target_email}!")
+                        st.success(f"✅ Lançamento inserido com sucesso!")
                         time.sleep(1.5); st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar: {e}")
                 else:
                     st.warning("⚠️ Preencha as horas (> 0) e a descrição.")
 
-    
+    # 2. NOVA OPÇÃO 4: CUSTO OPERACIONAL
+    with tab_custo:
+        st.info("Registre um custo direto (ex: Servidor, Ferramentas). O valor refletirá nos relatórios de BI e Pagamentos.")
+        with st.form("form_custo_admin", clear_on_submit=True):
+            c0, c1 = st.columns(2)
+            # Admin escolhe quem pagou/reembolsou (ou seleciona ele mesmo se for da empresa)
+            target_user_visual = c0.selectbox("👤 Responsável pelo Custo", opcoes_visuais_login, help="A quem este custo está atrelado para registro ou reembolso.")
+            input_projeto_custo = c1.selectbox("Projeto Atrelado", lista_projetos_ativos)
+            
+            c3, c4, c5 = st.columns([1, 1, 2])
+            input_data_custo = c3.date_input("Data do Custo", datetime.now())
+            # Recebe o Valor em Reais
+            input_valor_custo = c4.number_input("Valor Total (R$)", min_value=0.0, step=10.0, format="%.2f")
+            input_desc_custo = c5.text_input("Descrição (Ex: AWS, Banco de Dados)")
+            
+            status_inicial_custo = st.selectbox("Status", ["Aprovado", "Pendente"], index=0)
+            
+            if st.form_submit_button("🚀 Gravar Custo Operacional", type="primary"):
+                if input_valor_custo > 0 and input_desc_custo:
+                    try:
+                        target_email = login_visual_map[target_user_visual]
+                        competencia_str = input_data_custo.strftime("%Y-%m")
+                        data_full_str = input_data_custo.strftime("%Y-%m-%d")
+                        
+                        with conn.session as s:
+                            # A mágica: Salva como 1 hora, mas joga o valor total na coluna de "valor_hora_historico"
+                            s.execute(
+                                text("""
+                                    INSERT INTO lancamentos 
+                                    (id, colaborador_email, projeto, horas, competencia, data_atividade, tipo, descricao, valor_hora_historico, status_aprovaca, foi_editado) 
+                                    VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, :st, FALSE)
+                                """),
+                                {
+                                    "id": str(uuid.uuid4()), "e": target_email, "p": input_projeto_custo, 
+                                    "h": 1.0, # Horas = 1
+                                    "c": competencia_str, "d_atv": data_full_str, 
+                                    "t": "Custo Operacional", "d": f"[CUSTO] {input_desc_custo}", 
+                                    "v": input_valor_custo, # Valor da Nota/Custo
+                                    "st": status_inicial_custo
+                                }
+                            )
+                            s.commit()
+                        st.success(f"✅ Custo de R$ {input_valor_custo:,.2f} registrado com sucesso!")
+                        time.sleep(1.5); st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao salvar: {e}")
+                else:
+                    st.warning("⚠️ Preencha o valor e a descrição.")
+
     st.divider()
     
     # --- BLOCO B: PENDENTES ---
@@ -855,7 +894,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_p = df_p[df_p['colaborador_email'] == e_p]
         
     if not df_p.empty:
-        # 1. ADICIONADO 'tipo' AQUI
         df_p = df_p[['foi_editado', 'descricao', 'Nome', 'projeto', 'tipo', 'Data Real', 'horas', 'id']]
         df_p.insert(0, "✅", sel_all)
         df_p.insert(1, "🗑️", False)
@@ -868,12 +906,12 @@ elif selected_tab == "🛡️ Admin Aprovações":
             column_config={
                 "✅": st.column_config.CheckboxColumn("Apv", width="small"),
                 "🗑️": st.column_config.CheckboxColumn("Rej", width="small"),
-                "foi_editado": st.column_config.CheckboxColumn("⚠️ Editado?", disabled=True, help="O usuário alterou este item recentemente!"),
+                "foi_editado": st.column_config.CheckboxColumn("⚠️ Editado?", disabled=True),
                 "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
                 "horas": st.column_config.NumberColumn("HH.MM", format="%.2f"),
-                # 2. ADICIONADO COMBOBOX PARA PROJETO E TIPO (ITEM) NAS PENDÊNCIAS
                 "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
-                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Outros"], required=True)
+                # 3. Adicionado "Custo Operacional" na lista de opções para evitar erros de edição
+                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Custo Operacional", "Outros"], required=True)
             }
         )
         
@@ -882,7 +920,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
             df_to_approve = ed_p[ed_p["✅"] == True]
             if not df_to_approve.empty:
                 with conn.session as s:
-                    # 3. AGORA O APROVAR TAMBÉM SALVA QUALQUER EDIÇÃO FEITA NA TELA
                     for r in df_to_approve.itertuples():
                         s.execute(
                             text("UPDATE lancamentos SET status_aprovaca='Aprovado', foi_editado=FALSE, projeto=:p, tipo=:t, horas=:h, descricao=:d WHERE id=:id"), 
@@ -890,8 +927,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         )
                     s.commit()
                 st.toast("Aprovado e atualizado!")
-                time.sleep(0.5)
-                st.rerun()
+                time.sleep(0.5); st.rerun()
                 
         if c2.button("Rejeitar Selecionados"):
             ids = ed_p[ed_p["🗑️"] == True]["id"].tolist()
@@ -900,8 +936,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
                     s.execute(text("UPDATE lancamentos SET status_aprovaca='Negado' WHERE id IN :ids"), {"ids": tuple(ids)})
                     s.commit()
                 st.toast("Rejeitado!")
-                time.sleep(0.5)
-                st.rerun()
+                time.sleep(0.5); st.rerun()
     else:
         st.info("Nada pendente.")
 
@@ -919,10 +954,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
         df_a = df_a[df_a['colaborador_email'] == e_a]
         
     if not df_a.empty:
-        # 4. ADICIONADO 'tipo' AQUI NA ABA DE APROVADOS
         df_a = df_a[['descricao', 'Nome', 'projeto', 'tipo', 'competencia', 'Data Real', 'horas', 'status_aprovaca', 'id']]
-        
-        # Inserir coluna de deleção no dataframe visual
         df_a.insert(0, "Excluir", False)
         
         ed_a = st.data_editor(
@@ -931,43 +963,35 @@ elif selected_tab == "🛡️ Admin Aprovações":
             hide_index=True, 
             key="adm_aprov",
             column_config={
-                "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir", width="small", help="Marque para deletar este lançamento do banco."),
+                "Excluir": st.column_config.CheckboxColumn("🗑️ Excluir", width="small"),
                 "status_aprovaca": st.column_config.SelectboxColumn("Status", options=["Aprovado", "Pendente", "Negado"], required=True),
                 "Data Real": st.column_config.DateColumn("Data Ativ.", format="DD/MM/YYYY"),
                 "competencia": st.column_config.TextColumn("Comp. (Auto)", disabled=True),
-                # 5. ADICIONADO COMBOBOX PARA PROJETO E TIPO (ITEM)
                 "projeto": st.column_config.SelectboxColumn("Projeto", options=lista_projetos_ativos, required=True),
-                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Outros"], required=True)
+                # Adicionado "Custo Operacional" aqui também
+                "tipo": st.column_config.SelectboxColumn("Item (Tipo)", options=["Front-end", "Back-end", "Infra", "QA", "Dados", "Reunião", "Gestão", "Design", "Apoio", "Custo Operacional", "Outros"], required=True)
             }
         )
         
         if st.button("Salvar Alterações em Aprovados"):
             ids_to_delete = ed_a[ed_a["Excluir"] == True]["id"].tolist()
             df_to_update = ed_a[ed_a["Excluir"] == False]
-            
             count_updates = 0
             
             with conn.session as s:
-                # 1. Executa as Exclusões
                 if ids_to_delete:
                     s.execute(text("DELETE FROM lancamentos WHERE id IN :ids"), {"ids": tuple(ids_to_delete)})
                 
-                # 2. Executa as Atualizações do restante
                 for r in df_to_update.itertuples():
                     try:
                         d_val = getattr(r, "Data_Real") 
-                        
-                        if isinstance(d_val, str): 
-                            d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
-                        elif isinstance(d_val, pd.Timestamp): 
-                            d_obj = d_val.date()
-                        else:
-                            d_obj = d_val 
+                        if isinstance(d_val, str): d_obj = datetime.strptime(d_val, "%Y-%m-%d").date()
+                        elif isinstance(d_val, pd.Timestamp): d_obj = d_val.date()
+                        else: d_obj = d_val 
                         
                         c_s = d_obj.strftime("%Y-%m")
                         d_s = d_obj.strftime("%Y-%m-%d")
                         
-                        # 6. UPDATE SQL COM O CAMPO 'tipo' ADICIONADO E MAPADO COMO ':t'
                         s.execute(
                             text("""
                                 UPDATE lancamentos 
@@ -979,7 +1003,6 @@ elif selected_tab == "🛡️ Admin Aprovações":
                         count_updates += 1
                     except Exception as e:
                         st.error(f"Erro ao atualizar linha ID {r.id}: {e}")
-                        
                 s.commit()
             
             msgs = []
@@ -988,8 +1011,7 @@ elif selected_tab == "🛡️ Admin Aprovações":
             
             if msgs:
                 st.success(" e ".join(msgs) + " com sucesso!")
-                time.sleep(1.5)
-                st.rerun()
+                time.sleep(1.5); st.rerun()
     else:
         st.info("Nenhum item aprovado para este filtro.")
 
