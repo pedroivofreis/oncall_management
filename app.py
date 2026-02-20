@@ -368,63 +368,46 @@ else:
 # ==============================================================================
 st.sidebar.divider()
 
-# 1. GARANTIA DE ESTADO: Inicializa a aba se não existir
+# Inicializa o estado se não existir
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
 
-# --- BOTÃO DE ELITE: BI ESTRATÉGICO (SOMENTE ADMIN) ---
+# --- BOTÃO MINIMALISTA: BI ESTRATÉGICO ---
 if is_admin_session:
-    if st.sidebar.button("📊 DASHBOARD ESTRATÉGICO", use_container_width=True, type="primary"):
+    if st.sidebar.button("📈 DASHBOARD ESTRATÉGICO", use_container_width=True):
         st.session_state.selected_tab = "📈 BI Estratégico"
         st.rerun()
 
 st.sidebar.subheader("📍 Menu Principal")
 
-# 2. DEFINIÇÃO DAS OPÇÕES (BI removido da lista para evitar duplicidade)
 if is_admin_session:
     app_menu_options = [
-        "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal", 
-        "🧾 Notas Fiscais",
+        "📝 Lançamentos", "🗂️ Histórico Pessoal", "🧾 Notas Fiscais",
         "➖➖ 🔐 ÁREA ADMIN ➖➖",
-        "📊 Gestão de Painéis", 
-        "🛡️ Admin Aprovações", 
-        "💸 Pagamentos", 
-        "⚙️ Configurações"
+        "📊 Gestão de Painéis", "🛡️ Admin Aprovações", "💸 Pagamentos", "⚙️ Configurações"
     ]
 else:
-    app_menu_options = [
-        "📝 Lançamentos", 
-        "🗂️ Histórico Pessoal", 
-        "📊 Meu Painel", 
-        "🧾 Notas Fiscais"
-    ]
+    app_menu_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "📊 Meu Painel", "🧾 Notas Fiscais"]
 
-# 3. LÓGICA DE SINCRONIA: Define qual índice o rádio deve mostrar
+# Sincroniza o índice do rádio
 try:
     if st.session_state.selected_tab == "📈 BI Estratégico":
-        idx_tab = 0 # Foca no topo, mas o conteúdo será o BI
+        # Se estiver no BI, o rádio volta visualmente para a primeira opção, 
+        # mas não sobrescreve a sessão até o usuário clicar nele de fato.
+        idx_tab = 0
     else:
         idx_tab = app_menu_options.index(st.session_state.selected_tab)
-except (ValueError, IndexError):
+except:
     idx_tab = 0
 
-# 4. CRIAÇÃO DA VARIÁVEL: Aqui resolvemos o NameError
-selected_tab_radio = st.sidebar.radio(
-    "Ir para:", 
-    app_menu_options, 
-    index=idx_tab,
-    key="main_radio_menu"
-)
+selected_radio = st.sidebar.radio("Ir para:", app_menu_options, index=idx_tab)
 
-# Se o usuário mexer no rádio, atualizamos o estado (e saímos do BI se for o caso)
-if selected_tab_radio != st.session_state.selected_tab and st.session_state.selected_tab != "📈 BI Estratégico":
-    st.session_state.selected_tab = selected_tab_radio
-elif selected_tab_radio != st.session_state.selected_tab and st.session_state.selected_tab == "📈 BI Estratégico":
-    # Se estava no BI e clicou no rádio, o rádio ganha
-    st.session_state.selected_tab = selected_tab_radio
+# Só muda a aba se o rádio foi clicado (diferente do estado atual)
+if selected_radio != st.session_state.selected_tab:
+    # Se o rádio foi clicado e não estamos no BI, ou se clicamos para sair do BI
+    if st.session_state.selected_tab == "📈 BI Estratégico" or selected_radio in app_menu_options:
+        st.session_state.selected_tab = selected_radio
 
-# Atribuição final para o restante do código enxergar a aba correta
 selected_tab = st.session_state.selected_tab
 
 # Trava visual para o separador
