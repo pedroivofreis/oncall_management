@@ -371,20 +371,17 @@ st.sidebar.divider()
 # Inicializa o estado se não existir
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
-if 'menu_key' not in st.session_state:
-    st.session_state.menu_key = 0
 
 # --- BOTÃO MINIMALISTA: BI ESTRATÉGICO (SOMENTE ADMIN) ---
 if is_admin_session:
-    # Estilo discreto: texto azul, borda azul, sem fundo.
+    # Estilo discreto: sem fundo azul, apenas borda (conforme seu pedido)
     if st.sidebar.button("📈 DASHBOARD ESTRATÉGICO", use_container_width=True):
         st.session_state.selected_tab = "📈 BI Estratégico"
-        # A mágica: muda a chave do rádio para ele perder o foco e resetar
-        st.session_state.menu_key += 1 
         st.rerun()
 
 st.sidebar.subheader("📍 Menu Principal")
 
+# Define as opções
 if is_admin_session:
     app_menu_options = [
         "📝 Lançamentos", "🗂️ Histórico Pessoal", "🧾 Notas Fiscais",
@@ -394,28 +391,32 @@ if is_admin_session:
 else:
     app_menu_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "📊 Meu Painel", "🧾 Notas Fiscais"]
 
-# Sincroniza o índice do rádio com base no estado da sessão
+# LÓGICA INFALÍVEL: 
+# Se a aba atual for o BI, o rádio não pode forçar o índice. 
+# Usamos o parâmetro 'index' dinâmico e uma 'key' que muda quando entramos no BI.
 try:
     if st.session_state.selected_tab in app_menu_options:
-        idx_tab = app_menu_options.index(st.session_state.selected_tab)
+        current_idx = app_menu_options.index(st.session_state.selected_tab)
     else:
-        idx_tab = 0 # Se estiver no BI, o rádio volta visualmente para o topo
+        current_idx = 0 # Fallback se estiver no BI
 except:
-    idx_tab = 0
+    current_idx = 0
 
-# O rádio usa a 'menu_key' dinâmica para ser resetado pelo botão
+# A 'key' do rádio agora é vinculada à aba selecionada. 
+# Se a aba mudar via botão, o rádio é forçado a se reconstruir.
 selected_radio = st.sidebar.radio(
     "Ir para:", 
     app_menu_options, 
-    index=idx_tab, 
-    key=f"radio_menu_{st.session_state.menu_key}"
+    index=current_idx,
+    key=f"menu_radio_{st.session_state.selected_tab}" 
 )
 
-# Se o usuário clicar no rádio, ele assume o controle da aba
+# Atualiza o estado global
 if selected_radio != st.session_state.selected_tab:
     st.session_state.selected_tab = selected_radio
+    st.rerun()
 
-# Variável global para o restante do código
+# Variável para o restante do código
 selected_tab = st.session_state.selected_tab
 
 # Trava visual para o separador
