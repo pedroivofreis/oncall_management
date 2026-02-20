@@ -337,7 +337,7 @@ if user_selection_visual == "...":
         <br><br>
         <p style='color: gray; font-size: 0.85em; text-align: justify;'>
         <i><b>Disclaimer de Segurança:</b> Este é um ambiente corporativo privado. O acesso é restrito a colaboradores e parceiros autorizados da OnCall. Todas as transações financeiras, aprovações e uploads de documentos são registrados com marcação de tempo. Em caso de perda de senha ou necessidade de acesso a novos projetos, contate a administração do sistema.</i>
-        </p>
+        </p><br>Desenvolvido por Pedro Reis - 2026
     </div>
     """, unsafe_allow_html=True)
     
