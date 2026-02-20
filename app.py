@@ -688,12 +688,14 @@ elif selected_tab == "🛡️ Admin Aprovações":
                                         VALUES (:id, :e, :p, :h, :c, :d_atv, :t, :d, :v, 'Pendente', FALSE)
                                     """),
                                     {
-                                        "id": str(uuid.uuid4()), "e": email_colab, "p": r[map_proj], "h": r[map_horas], 
+                                        "id": str(uuid.uuid4()), "e": email_colab, "p": r[map_proj], "h": float(r[map_horas]), 
                                         "c": comp_str, "d_atv": data_full, "t": tipo_val, "d": r[map_desc], "v": v_h
                                     }
                                 )
                                 count_imported += 1
-                        s.commit()
+                                
+                            # CORREÇÃO: s.commit() agora está DENTRO do bloco 'with conn.session as s:'
+                            s.commit()
                         
                         st.success(f"{count_imported} registros importados com sucesso!")
                         time.sleep(1.5)
