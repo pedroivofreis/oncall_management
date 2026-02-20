@@ -1155,14 +1155,15 @@ elif selected_tab == "💸 Pagamentos":
             df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
             df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
             
-            # --- MÁGICA DE CORREÇÃO AQUI ---
-            # Como os lançamentos novos nascem com status vazio no banco (NaN), 
-            # forçamos o Pandas a preencher tudo com "Em aberto" para a soma funcionar!
+            # --- MÁGICA DE CORREÇÃO BLINDADA AQUI ---
+            # Transforma qualquer valor nulo (NaN), palavra 'None' ou vazio em "Em aberto"
             if 'status_pagamento' not in df_pay.columns:
                 df_pay['status_pagamento'] = 'Em aberto'
             else:
-                df_pay['status_pagamento'] = df_pay['status_pagamento'].fillna('Em aberto')
-            # -------------------------------
+                df_pay['status_pagamento'] = df_pay['status_pagamento'].apply(
+                    lambda x: 'Em aberto' if pd.isna(x) or str(x).strip() in ['', 'None', 'nan', 'NaN'] else x
+                )
+            # ----------------------------------------
             
             # --- SCORECARDS VISUAIS ---
             st.markdown("### 📊 Resumo por Status")
