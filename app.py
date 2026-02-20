@@ -1155,13 +1155,14 @@ elif selected_tab == "💸 Pagamentos":
             df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
             df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
             
-            # --- MÁGICA DE CORREÇÃO BLINDADA AQUI ---
-            # Transforma qualquer valor nulo (NaN), palavra 'None' ou vazio em "Em aberto"
+            # --- MÁGICA DE CORREÇÃO SUPER BLINDADA AQUI ---
+            # Se o status não for nenhum dos 3 já conhecidos, força virar exatamente "Em aberto"
+            status_conhecidos = ["Pago", "Liberado para pagamento", "Parcial"]
             if 'status_pagamento' not in df_pay.columns:
                 df_pay['status_pagamento'] = 'Em aberto'
             else:
                 df_pay['status_pagamento'] = df_pay['status_pagamento'].apply(
-                    lambda x: 'Em aberto' if pd.isna(x) or str(x).strip() in ['', 'None', 'nan', 'NaN'] else x
+                    lambda x: str(x).strip() if str(x).strip() in status_conhecidos else 'Em aberto'
                 )
             # ----------------------------------------
             
