@@ -371,11 +371,16 @@ st.sidebar.divider()
 # Inicializa o estado se não existir
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
+if 'menu_key' not in st.session_state:
+    st.session_state.menu_key = 0
 
-# --- BOTÃO MINIMALISTA: BI ESTRATÉGICO ---
+# --- BOTÃO MINIMALISTA: BI ESTRATÉGICO (SOMENTE ADMIN) ---
 if is_admin_session:
+    # Estilo discreto: texto azul, borda azul, sem fundo.
     if st.sidebar.button("📈 DASHBOARD ESTRATÉGICO", use_container_width=True):
         st.session_state.selected_tab = "📈 BI Estratégico"
+        # A mágica: muda a chave do rádio para ele perder o foco e resetar
+        st.session_state.menu_key += 1 
         st.rerun()
 
 st.sidebar.subheader("📍 Menu Principal")
@@ -389,25 +394,28 @@ if is_admin_session:
 else:
     app_menu_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "📊 Meu Painel", "🧾 Notas Fiscais"]
 
-# Sincroniza o índice do rádio
+# Sincroniza o índice do rádio com base no estado da sessão
 try:
-    if st.session_state.selected_tab == "📈 BI Estratégico":
-        # Se estiver no BI, o rádio volta visualmente para a primeira opção, 
-        # mas não sobrescreve a sessão até o usuário clicar nele de fato.
-        idx_tab = 0
-    else:
+    if st.session_state.selected_tab in app_menu_options:
         idx_tab = app_menu_options.index(st.session_state.selected_tab)
+    else:
+        idx_tab = 0 # Se estiver no BI, o rádio volta visualmente para o topo
 except:
     idx_tab = 0
 
-selected_radio = st.sidebar.radio("Ir para:", app_menu_options, index=idx_tab)
+# O rádio usa a 'menu_key' dinâmica para ser resetado pelo botão
+selected_radio = st.sidebar.radio(
+    "Ir para:", 
+    app_menu_options, 
+    index=idx_tab, 
+    key=f"radio_menu_{st.session_state.menu_key}"
+)
 
-# Só muda a aba se o rádio foi clicado (diferente do estado atual)
+# Se o usuário clicar no rádio, ele assume o controle da aba
 if selected_radio != st.session_state.selected_tab:
-    # Se o rádio foi clicado e não estamos no BI, ou se clicamos para sair do BI
-    if st.session_state.selected_tab == "📈 BI Estratégico" or selected_radio in app_menu_options:
-        st.session_state.selected_tab = selected_radio
+    st.session_state.selected_tab = selected_radio
 
+# Variável global para o restante do código
 selected_tab = st.session_state.selected_tab
 
 # Trava visual para o separador
