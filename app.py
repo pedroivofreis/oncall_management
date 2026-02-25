@@ -1190,7 +1190,7 @@ elif selected_tab == "🧾 Notas Fiscais":
         st.info("Você não possui requisições de Nota Fiscal no seu nome.")
 
 # ==============================================================================
-# ABA 6: PAGAMENTOS (DRILL-DOWN COM PARCIAL)
+# ABA 6: PAGAMENTOS (COM CÁLCULO DE SALDO DEVEDOR)
 # ==============================================================================
 elif selected_tab == "💸 Pagamentos":
     st.subheader("💸 Consolidação Financeira")
@@ -1199,31 +1199,32 @@ elif selected_tab == "💸 Pagamentos":
     df_pay_base = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
     
     if not df_pay_base.empty:
-        # Garante que a coluna nova existe no DataFrame para não dar erro se o banco estiver vazio nela
-        if 'observacao_financeira' not in df_pay_base.columns:
-            df_pay_base['observacao_financeira'] = None
+        # Garante colunas necessárias
+        if 'observacao_financeira' not in df_pay_base.columns: df_pay_base['observacao_financeira'] = ""
+        if 'valor_pago' not in df_pay_base.columns: df_pay_base['valor_pago'] = 0.0
 
-        # --- NOVO FILTRO DE COMPETÊNCIA ---
+        # --- FILTRO DE COMPETÊNCIA ---
         all_comps_pay = sorted(df_pay_base['competencia'].astype(str).unique(), reverse=True)
         comp_sel_pay = st.multiselect(
-            "📅 Filtrar Competência(s):", 
-            all_comps_pay, 
+            "📅 Filtrar Competência(s):", all_comps_pay, 
             default=all_comps_pay[:1] if all_comps_pay else None,
             key="filtro_comp_pagamentos"
         )
         
-        # Aplica o filtro selecionado
+        # Aplica o filtro
         if comp_sel_pay:
             df_pay = df_pay_base[df_pay_base['competencia'].isin(comp_sel_pay)].copy()
         else:
-            df_pay = pd.DataFrame() # Esvazia se nada for selecionado
+            df_pay = pd.DataFrame()
             
         if not df_pay.empty:
+            # Cálculos Financeiros
             df_pay['h_dec'] = df_pay['horas'].apply(convert_hhmm_to_decimal)
-            df_pay['r$'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
+            df_pay['valor_bruto'] = df_pay['h_dec'] * df_pay['valor_hora_historico']
+            df_pay['valor_pago'] = df_pay['valor_pago'].fillna(0.0)
+            df_pay['saldo'] = df_pay['valor_bruto'] - df_pay['valor_pago']
             
-            # --- MÁGICA DE CORREÇÃO SUPER BLINDADA AQUI ---
-            # Se o status não for nenhum dos 3 já conhecidos, força virar exatamente "Em aberto"
+            # --- STATUS CORREÇÃO ---
             status_conhecidos = ["Pago", "Liberado para pagamento", "Parcial"]
             if 'status_pagamento' not in df_pay.columns:
                 df_pay['status_pagamento'] = 'Em aberto'
@@ -1231,99 +1232,142 @@ elif selected_tab == "💸 Pagamentos":
                 df_pay['status_pagamento'] = df_pay['status_pagamento'].apply(
                     lambda x: str(x).strip() if str(x).strip() in status_conhecidos else 'Em aberto'
                 )
-            # ----------------------------------------
             
-            # --- SCORECARD TOTAL GERAL (NOVO CANTO DIREITO) ---
-            c_titulo, c_total = st.columns([3, 1])
-            with c_titulo:
-                st.markdown("### 📊 Resumo por Status")
-            with c_total:
-                st.metric("💰 Total da Competência", f"R$ {df_pay['r$'].sum():,.2f}", f"{df_pay['horas'].sum():.2f}h", delta_color="off")
+            # --- KPIS DO TOPO ---
+            total_devido = df_pay['valor_bruto'].sum()
+            total_pago = df_pay['valor_pago'].sum()
+            total_restante = total_devido - total_pago
             
-            # --- SCORECARDS VISUAIS DE STATUS ---
-            c1, c2, c3, c4 = st.columns(4)
-            
-            df_aberto = df_pay[df_pay['status_pagamento'] == 'Em aberto']
-            df_liberado = df_pay[df_pay['status_pagamento'] == 'Liberado para pagamento']
-            df_parcial = df_pay[df_pay['status_pagamento'] == 'Parcial']
-            df_pago = df_pay[df_pay['status_pagamento'] == 'Pago']
-            
-            c1.metric("🔴 Em Aberto", f"R$ {df_aberto['r$'].sum():,.2f}", f"{df_aberto['horas'].sum():.2f}h", delta_color="off")
-            c2.metric("🔵 Liberado para pagamento", f"R$ {df_liberado['r$'].sum():,.2f}", f"{df_liberado['horas'].sum():.2f}h", delta_color="off")
-            c3.metric("🟡 Parcial", f"R$ {df_parcial['r$'].sum():,.2f}", f"{df_parcial['horas'].sum():.2f}h", delta_color="off")
-            c4.metric("🟢 Pago", f"R$ {df_pago['r$'].sum():,.2f}", f"{df_pago['horas'].sum():.2f}h", delta_color="off")
+            c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+            c_kpi1.metric("Valor Total (Bruto)", f"R$ {total_devido:,.2f}")
+            c_kpi2.metric("Já Pago", f"R$ {total_pago:,.2f}")
+            c_kpi3.metric("Falta Pagar", f"R$ {total_restante:,.2f}", delta=f"-{(total_pago/total_devido)*100:.1f}%" if total_devido > 0 else "0%")
             
             st.divider()
-            # --------------------------------
-            
-            df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({'r$': 'sum', 'horas': 'sum'}).reset_index()
+
+            # --- AGRUPAMENTO POR COLABORADOR ---
+            df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({
+                'valor_bruto': 'sum', 
+                'valor_pago': 'sum',
+                'saldo': 'sum',
+                'horas': 'sum'
+            }).reset_index()
             df_g = df_g.sort_values(['competencia'], ascending=False)
             
             for idx, row in df_g.iterrows():
                 nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
                 
+                # Detalhes do grupo
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
+                
+                # Definição visual do status do card
                 s_at = det['status_pagamento'].iloc[0] if not det.empty else "Em aberto"
+                saldo_grupo = row['saldo']
                 
-                # Pega a observação já salva (se houver) para exibir
-                obs_atual = det['observacao_financeira'].iloc[0]
-                texto_obs = ""
-                if pd.notna(obs_atual) and str(obs_atual).strip() != "":
-                    texto_obs = f" | 📝 {str(obs_atual)}"
+                # Ícone e Cor baseados no saldo
+                if saldo_grupo <= 0.01: # Considera erro de arredondamento
+                    badge = "🟢 QUITADO"
+                elif row['valor_pago'] > 0:
+                    badge = f"🟡 PARCIAL (Falta R$ {saldo_grupo:,.2f})"
+                else:
+                    badge = f"🔴 ABERTO (R$ {row['valor_bruto']:,.2f})"
+                
+                # Preview da observação
+                obs_txt = ""
+                obs_val = det['observacao_financeira'].iloc[0]
+                if pd.notna(obs_val) and str(obs_val).strip() != "":
+                    obs_txt = f" | 📝 {str(obs_val)}"
 
-                if s_at == "Pago": badge = "🟢 PAGO"
-                elif s_at == "Liberado para pagamento": badge = "🔵 LIBERADO"
-                elif s_at == "Parcial": badge = "🟡 PARCIAL"
-                else: badge = "🔴 EM ABERTO"
-                
-                with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}{texto_obs}"):
+                with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm}{obs_txt}"):
                     
+                    # Tabela detalhada
                     st.dataframe(
-                        det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento', 'observacao_financeira']],
-                        use_container_width=True, 
-                        hide_index=True,
+                        det[['descricao', 'Data Real', 'horas', 'valor_bruto', 'valor_pago', 'saldo', 'status_pagamento']],
+                        use_container_width=True, hide_index=True,
                         column_config={
-                            "r$": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                            "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                            "observacao_financeira": st.column_config.TextColumn("Obs./Valor Pago")
+                            "valor_bruto": st.column_config.NumberColumn("Valor Bruto", format="R$ %.2f"),
+                            "valor_pago": st.column_config.NumberColumn("Pago", format="R$ %.2f"),
+                            "saldo": st.column_config.NumberColumn("Saldo", format="R$ %.2f"),
+                            "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
                         }
                     )
                     
+                    # CONTROLES DE AÇÃO
                     ops = ["Em aberto", "Liberado para pagamento", "Parcial", "Pago"]
                     ix = ops.index(s_at) if s_at in ops else 0
                     
-                    c_up1, c_up2 = st.columns([3, 1])
-                    ns = c_up1.selectbox("Status do Grupo", ops, index=ix, key=f"p_{idx}")
+                    c_up1, c_up2, c_up3 = st.columns([2, 2, 1])
+                    ns = c_up1.selectbox("Status", ops, index=ix, key=f"stat_{idx}")
                     
-                    # --- LÓGICA DE VALOR PARCIAL ---
-                    novo_valor_obs = obs_atual # Mantém o que já estava
+                    # Inputs condicionais
+                    novo_valor_pago = row['valor_pago'] # Valor padrão é o que já está no banco
+                    nova_obs = obs_val if pd.notna(obs_val) else ""
+                    
                     if ns == "Parcial":
-                        if pd.isna(novo_valor_obs): novo_valor_obs = ""
-                        novo_valor_obs = st.text_input(
-                            "Informe o Valor Pago (R$) ou Observação:", 
-                            value=str(novo_valor_obs),
-                            placeholder="Ex: Pago R$ 1.500,00 via PIX",
-                            key=f"obs_{idx}"
+                        novo_valor_pago = c_up2.number_input(
+                            "Valor Pago Total (R$):", 
+                            min_value=0.0, 
+                            max_value=float(row['valor_bruto']),
+                            value=float(row['valor_pago']),
+                            step=10.0,
+                            key=f"val_pay_{idx}",
+                            help="Informe o valor TOTAL acumulado que já foi pago para este grupo."
                         )
-                    # -------------------------------
+                        nova_obs = st.text_input("Observação Financeira:", value=str(nova_obs), key=f"obs_pay_{idx}")
                     
-                    if c_up2.button("Atualizar Pagamento", key=f"b_{idx}"):
-                        with conn.session as s:
-                            ids_u = tuple(det['id'].tolist())
-                            # Atualiza Status E a Observação
-                            s.execute(
-                                text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids"), 
-                                {"s": ns, "ids": ids_u, "o": novo_valor_obs}
-                            )
-                            s.commit()
-                        st.toast("Status atualizado com sucesso!")
-                        time.sleep(0.5)
-                        st.rerun()
+                    elif ns == "Pago":
+                        # Se marcou Pago, o valor pago vira o valor bruto automaticamente
+                        novo_valor_pago = row['valor_bruto']
+                        c_up2.info(f"Será baixado o total: R$ {novo_valor_pago:,.2f}")
+                    
+                    elif ns == "Em aberto":
+                        novo_valor_pago = 0.0
+                        c_up2.warning("O valor pago será zerado.")
+
+                    # BOTÃO DE ATUALIZAR
+                    if c_up3.button("Salvar Baixa", key=f"btn_{idx}", type="primary"):
+                        try:
+                            with conn.session as s:
+                                ids_u = tuple(det['id'].tolist())
+                                total_bruto_grupo = row['valor_bruto']
+                                
+                                # Cálculo da Proporção (Ratio) para distribuir o valor pago entre os itens
+                                # Evita divisão por zero
+                                if total_bruto_grupo > 0:
+                                    ratio = novo_valor_pago / total_bruto_grupo
+                                else:
+                                    ratio = 0
+                                
+                                # 1. Atualiza Status e Obs
+                                s.execute(
+                                    text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids"), 
+                                    {"s": ns, "ids": ids_u, "o": nova_obs}
+                                )
+                                
+                                # 2. Atualiza Valor Pago Proporcionalmente (SQL Matemático)
+                                # valor_pago = (horas * valor_hora_historico) * ratio
+                                # Convertemos horas (NUMERIC) para float no calculo se precisar, mas o banco trata bem
+                                s.execute(
+                                    text("""
+                                        UPDATE lancamentos 
+                                        SET valor_pago = (horas * valor_hora_historico * :rat)
+                                        WHERE id IN :ids
+                                    """),
+                                    {"rat": ratio, "ids": ids_u}
+                                )
+                                s.commit()
+                            
+                            st.toast("Financeiro atualizado com sucesso!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao atualizar: {e}")
+
         else:
-            st.info("👆 Selecione pelo menos uma competência acima para visualizar os pagamentos.")
+            st.info("👆 Selecione pelo menos uma competência acima.")
     else:
         st.info("Nenhum lançamento aprovado no sistema.")
-
+        
 # ==============================================================================
 # ABA 7: BI ESTRATÉGICO
 # ==============================================================================
