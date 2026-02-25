@@ -1190,7 +1190,7 @@ elif selected_tab == "🧾 Notas Fiscais":
         st.info("Você não possui requisições de Nota Fiscal no seu nome.")
 
 # ==============================================================================
-# ABA 6: PAGAMENTOS (DRILL-DOWN)
+# ABA 6: PAGAMENTOS (DRILL-DOWN COM PARCIAL)
 # ==============================================================================
 elif selected_tab == "💸 Pagamentos":
     st.subheader("💸 Consolidação Financeira")
@@ -1199,6 +1199,10 @@ elif selected_tab == "💸 Pagamentos":
     df_pay_base = df_lancamentos[df_lancamentos['status_aprovaca'] == 'Aprovado'].copy()
     
     if not df_pay_base.empty:
+        # Garante que a coluna nova existe no DataFrame para não dar erro se o banco estiver vazio nela
+        if 'observacao_financeira' not in df_pay_base.columns:
+            df_pay_base['observacao_financeira'] = None
+
         # --- NOVO FILTRO DE COMPETÊNCIA ---
         all_comps_pay = sorted(df_pay_base['competencia'].astype(str).unique(), reverse=True)
         comp_sel_pay = st.multiselect(
@@ -1261,20 +1265,27 @@ elif selected_tab == "💸 Pagamentos":
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
                 s_at = det['status_pagamento'].iloc[0] if not det.empty else "Em aberto"
                 
+                # Pega a observação já salva (se houver) para exibir
+                obs_atual = det['observacao_financeira'].iloc[0]
+                texto_obs = ""
+                if pd.notna(obs_atual) and str(obs_atual).strip() != "":
+                    texto_obs = f" | 📝 {str(obs_atual)}"
+
                 if s_at == "Pago": badge = "🟢 PAGO"
                 elif s_at == "Liberado para pagamento": badge = "🔵 LIBERADO"
                 elif s_at == "Parcial": badge = "🟡 PARCIAL"
                 else: badge = "🔴 EM ABERTO"
                 
-                with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}"):
+                with st.expander(f"{badge} | 📅 {row['competencia']} | 👤 {nm} | R$ {row['r$']:,.2f}{texto_obs}"):
                     
                     st.dataframe(
-                        det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento']],
+                        det[['descricao', 'Data Real', 'horas', 'r$', 'status_pagamento', 'observacao_financeira']],
                         use_container_width=True, 
                         hide_index=True,
                         column_config={
                             "r$": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                            "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY")
+                            "Data Real": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                            "observacao_financeira": st.column_config.TextColumn("Obs./Valor Pago")
                         }
                     )
                     
@@ -1282,14 +1293,30 @@ elif selected_tab == "💸 Pagamentos":
                     ix = ops.index(s_at) if s_at in ops else 0
                     
                     c_up1, c_up2 = st.columns([3, 1])
-                    ns = c_up1.selectbox("Status", ops, index=ix, key=f"p_{idx}")
+                    ns = c_up1.selectbox("Status do Grupo", ops, index=ix, key=f"p_{idx}")
+                    
+                    # --- LÓGICA DE VALOR PARCIAL ---
+                    novo_valor_obs = obs_atual # Mantém o que já estava
+                    if ns == "Parcial":
+                        if pd.isna(novo_valor_obs): novo_valor_obs = ""
+                        novo_valor_obs = st.text_input(
+                            "Informe o Valor Pago (R$) ou Observação:", 
+                            value=str(novo_valor_obs),
+                            placeholder="Ex: Pago R$ 1.500,00 via PIX",
+                            key=f"obs_{idx}"
+                        )
+                    # -------------------------------
                     
                     if c_up2.button("Atualizar Pagamento", key=f"b_{idx}"):
                         with conn.session as s:
                             ids_u = tuple(det['id'].tolist())
-                            s.execute(text("UPDATE lancamentos SET status_pagamento=:s WHERE id IN :ids"), {"s": ns, "ids": ids_u})
+                            # Atualiza Status E a Observação
+                            s.execute(
+                                text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids"), 
+                                {"s": ns, "ids": ids_u, "o": novo_valor_obs}
+                            )
                             s.commit()
-                        st.toast("Status atualizado!")
+                        st.toast("Status atualizado com sucesso!")
                         time.sleep(0.5)
                         st.rerun()
         else:
