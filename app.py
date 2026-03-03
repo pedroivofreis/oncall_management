@@ -1271,12 +1271,21 @@ elif selected_tab == "💸 Pagamentos":
                 'valor_bruto': 'sum',
                 'valor_pago': 'sum',
                 'saldo': 'sum',
-                'horas': 'sum',
-                'status_pagamento': 'first'   # status do primeiro lançamento do grupo
+                'horas': 'sum'
             }).reset_index()
-            # Quitado = saldo zerado OU status explicitamente 'Pago'
-            # (cobre casos onde valor_pago ficou 0 por bug mas status já foi marcado como Pago)
-            df_g['_quitado'] = (df_g['saldo'] <= 0.01) | (df_g['status_pagamento'] == 'Pago')
+
+            # Verifica se TODOS os lançamentos do grupo têm status='Pago'
+            # (evita o problema de 'first' pegar um status 'Pendente' antes de um 'Pago')
+            todos_pagos = (
+                df_pay.groupby(['competencia', 'colaborador_email'])['status_pagamento']
+                .apply(lambda x: (x == 'Pago').all())
+                .reset_index()
+            )
+            todos_pagos.columns = ['competencia', 'colaborador_email', '_todos_pagos']
+            df_g = df_g.merge(todos_pagos, on=['competencia', 'colaborador_email'])
+
+            # Quitado = saldo zerado OU todos os lançamentos marcados como Pago
+            df_g['_quitado'] = (df_g['saldo'] <= 0.01) | df_g['_todos_pagos']
             df_g = df_g.sort_values(['_quitado', 'competencia'], ascending=[True, False])
 
             secao_pendente_iniciada = False
@@ -1289,7 +1298,14 @@ elif selected_tab == "💸 Pagamentos":
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
 
                 # Definição visual do status do card
-                s_at = det['status_pagamento'].iloc[0] if not det.empty else "Em aberto"
+                # Se todos são Pago, usa 'Pago'; senão pega o status mais frequente (mode)
+                if row['_todos_pagos']:
+                    s_at = 'Pago'
+                elif not det.empty:
+                    mode_series = det['status_pagamento'].mode()
+                    s_at = mode_series.iloc[0] if not mode_series.empty else "Em aberto"
+                else:
+                    s_at = "Em aberto"
                 saldo_grupo = row['saldo']
 
                 # Cabeçalho de seção (apenas uma vez por grupo)
