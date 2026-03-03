@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, date
 import uuid
 import time
 import io
-from sqlalchemy import text, bindparam
+from sqlalchemy import text
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E META-DADOS
@@ -1331,32 +1331,27 @@ elif selected_tab == "💸 Pagamentos":
                     if c_up3.button("Salvar Baixa", key=f"btn_{idx}", type="primary"):
                         try:
                             with conn.session as s:
-                                ids_u = tuple(det['id'].tolist())
                                 total_bruto_grupo = row['valor_bruto']
-                                
+
                                 # Cálculo da Proporção (Ratio) para distribuir o valor pago entre os itens
                                 # Evita divisão por zero
                                 if total_bruto_grupo > 0:
                                     ratio = novo_valor_pago / total_bruto_grupo
                                 else:
                                     ratio = 0
-                                
-                                # 1. Atualiza Status e Obs
-                                s.execute(
-                                    text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
-                                    {"s": ns, "ids": list(ids_u), "o": nova_obs}
-                                )
 
-                                # 2. Atualiza Valor Pago Proporcionalmente (SQL Matemático)
-                                # valor_pago = (horas * valor_hora_historico) * ratio
-                                s.execute(
-                                    text("""
-                                        UPDATE lancamentos
-                                        SET valor_pago = (horas * valor_hora_historico * :rat)
-                                        WHERE id IN :ids
-                                    """).bindparams(bindparam("ids", expanding=True)),
-                                    {"rat": ratio, "ids": list(ids_u)}
-                                )
+                                # Atualiza Status, Obs e Valor Pago em um único UPDATE por linha
+                                for id_val in det['id'].tolist():
+                                    s.execute(
+                                        text("""
+                                            UPDATE lancamentos
+                                            SET status_pagamento=:s,
+                                                observacao_financeira=:o,
+                                                valor_pago=(horas * valor_hora_historico * :rat)
+                                            WHERE id=:id
+                                        """),
+                                        {"s": ns, "o": nova_obs, "rat": ratio, "id": id_val}
+                                    )
                                 s.commit()
                             
                             st.toast("Financeiro atualizado com sucesso!")
