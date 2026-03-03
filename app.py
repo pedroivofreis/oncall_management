@@ -1268,30 +1268,44 @@ elif selected_tab == "💸 Pagamentos":
 
             # --- AGRUPAMENTO POR COLABORADOR ---
             df_g = df_pay.groupby(['competencia', 'colaborador_email']).agg({
-                'valor_bruto': 'sum', 
+                'valor_bruto': 'sum',
                 'valor_pago': 'sum',
                 'saldo': 'sum',
                 'horas': 'sum'
             }).reset_index()
-            df_g = df_g.sort_values(['competencia'], ascending=False)
-            
+            # Separa quitados (saldo ≤ 0.01) dos pendentes, mantendo competência desc dentro de cada grupo
+            df_g['_quitado'] = df_g['saldo'] <= 0.01
+            df_g = df_g.sort_values(['_quitado', 'competencia'], ascending=[True, False])
+
+            secao_pendente_iniciada = False
+            secao_quitado_iniciada = False
+
             for idx, row in df_g.iterrows():
                 nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
-                
+
                 # Detalhes do grupo
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
-                
+
                 # Definição visual do status do card
                 s_at = det['status_pagamento'].iloc[0] if not det.empty else "Em aberto"
                 saldo_grupo = row['saldo']
-                
+
+                # Cabeçalho de seção (apenas uma vez por grupo)
+                if not row['_quitado'] and not secao_pendente_iniciada:
+                    st.markdown("#### 🔴 Em Aberto / Parcial / Liberados")
+                    secao_pendente_iniciada = True
+                elif row['_quitado'] and not secao_quitado_iniciada:
+                    st.divider()
+                    st.markdown("#### 🟢 Quitados")
+                    secao_quitado_iniciada = True
+
                 # Ícone e Cor baseados no saldo
-                if saldo_grupo <= 0.01: # Considera erro de arredondamento
-                    badge = "🟢 QUITADO"
+                if saldo_grupo <= 0.01:
+                    badge = f"🟢 QUITADO | R$ {row['valor_pago']:,.2f} pago"
                 elif row['valor_pago'] > 0:
-                    badge = f"🟡 PARCIAL (Falta R$ {saldo_grupo:,.2f})"
+                    badge = f"🟡 PARCIAL | Pago R$ {row['valor_pago']:,.2f} | Falta R$ {saldo_grupo:,.2f}"
                 else:
-                    badge = f"🔴 ABERTO (R$ {row['valor_bruto']:,.2f})"
+                    badge = f"🔴 ABERTO | R$ {row['valor_bruto']:,.2f} a pagar"
                 
                 # Preview da observação
                 obs_txt = ""
