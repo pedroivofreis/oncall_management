@@ -1297,7 +1297,7 @@ elif selected_tab == "💸 Pagamentos":
             sec_iniciada = {0: False, 1: False, 2: False}
             SEC_INFO = {
                 0: ("#### 🔴 Em Aberto / Liberados", False),
-                1: ("#### 🔵 Em Processo (parte já paga)", True),
+                1: ("#### 🟡 Parcialmente Pago", True),
                 2: ("#### 🟢 Quitados", True),
             }
 
@@ -1329,8 +1329,9 @@ elif selected_tab == "💸 Pagamentos":
                 if cat == 2:
                     badge = f"🟢 QUITADO | R$ {valor_ref:,.2f} pago"
                 elif cat == 1:
-                    qtd_pago = (det['status_pagamento'] == 'Pago').sum()
-                    badge = f"🔵 EM PROCESSO | {qtd_pago}/{len(det)} lançamentos pagos"
+                    vl_pago_parcial = det.loc[det['status_pagamento'] == 'Pago', 'valor_bruto'].sum()
+                    vl_pendente     = det.loc[det['status_pagamento'] != 'Pago', 'valor_bruto'].sum()
+                    badge = f"🟡 PARCIALMENTE PAGO | Pago R$ {vl_pago_parcial:,.2f} | Falta R$ {vl_pendente:,.2f}"
                 elif row['valor_pago'] > 0:
                     badge = f"🟡 PARCIAL | Pago R$ {row['valor_pago']:,.2f} | Falta R$ {saldo_grupo:,.2f}"
                 else:
