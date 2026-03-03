@@ -1274,31 +1274,38 @@ elif selected_tab == "💸 Pagamentos":
                 'horas': 'sum'
             }).reset_index()
 
-            # Verifica se TODOS os lançamentos do grupo têm status='Pago'
-            # (evita o problema de 'first' pegar um status 'Pendente' antes de um 'Pago')
-            todos_pagos = (
-                df_pay.groupby(['competencia', 'colaborador_email'])['status_pagamento']
-                .apply(lambda x: (x == 'Pago').all())
-                .reset_index()
-            )
-            todos_pagos.columns = ['competencia', 'colaborador_email', '_todos_pagos']
-            df_g = df_g.merge(todos_pagos, on=['competencia', 'colaborador_email'])
+            # Calcula flags de status por grupo (duas applies separadas para garantir estrutura)
+            grp_status = df_pay.groupby(['competencia', 'colaborador_email'])['status_pagamento']
+            todos_pagos_s   = grp_status.apply(lambda x: bool((x == 'Pago').all())).reset_index()
+            qualquer_pago_s = grp_status.apply(lambda x: bool((x == 'Pago').any())).reset_index()
+            todos_pagos_s.columns   = ['competencia', 'colaborador_email', '_todos_pagos']
+            qualquer_pago_s.columns = ['competencia', 'colaborador_email', '_qualquer_pago']
+            df_g = df_g.merge(todos_pagos_s, on=['competencia', 'colaborador_email'])
+            df_g = df_g.merge(qualquer_pago_s, on=['competencia', 'colaborador_email'])
 
-            # Quitado = saldo zerado OU todos os lançamentos marcados como Pago
-            df_g['_quitado'] = (df_g['saldo'] <= 0.01) | df_g['_todos_pagos']
-            df_g = df_g.sort_values(['_quitado', 'competencia'], ascending=[True, False])
+            # Três categorias de ordenação: 0=Aberto, 1=Em Processo, 2=Quitado
+            def _cat(r):
+                if (r['saldo'] <= 0.01) or r['_todos_pagos']:
+                    return 2  # Quitado
+                if r['_qualquer_pago']:
+                    return 1  # Em Processo (mix pago/pendente)
+                return 0      # Aberto
 
-            secao_pendente_iniciada = False
-            secao_quitado_iniciada = False
+            df_g['_cat'] = df_g.apply(_cat, axis=1)
+            df_g = df_g.sort_values(['_cat', 'competencia'], ascending=[True, False])
+
+            sec_iniciada = {0: False, 1: False, 2: False}
+            SEC_INFO = {
+                0: ("#### 🔴 Em Aberto / Liberados", False),
+                1: ("#### 🔵 Em Processo (parte já paga)", True),
+                2: ("#### 🟢 Quitados", True),
+            }
 
             for idx, row in df_g.iterrows():
                 nm = email_to_name_map.get(row['colaborador_email'], row['colaborador_email'])
-
-                # Detalhes do grupo
                 det = df_pay[(df_pay['competencia'] == row['competencia']) & (df_pay['colaborador_email'] == row['colaborador_email'])]
 
-                # Definição visual do status do card
-                # Se todos são Pago, usa 'Pago'; senão pega o status mais frequente (mode)
+                # Definição visual do status para o selectbox
                 if row['_todos_pagos']:
                     s_at = 'Pago'
                 elif not det.empty:
@@ -1308,19 +1315,22 @@ elif selected_tab == "💸 Pagamentos":
                     s_at = "Em aberto"
                 saldo_grupo = row['saldo']
 
-                # Cabeçalho de seção (apenas uma vez por grupo)
-                if not row['_quitado'] and not secao_pendente_iniciada:
-                    st.markdown("#### 🔴 Em Aberto / Parcial / Liberados")
-                    secao_pendente_iniciada = True
-                elif row['_quitado'] and not secao_quitado_iniciada:
-                    st.divider()
-                    st.markdown("#### 🟢 Quitados")
-                    secao_quitado_iniciada = True
+                # Cabeçalho de seção (uma vez por categoria)
+                cat = row['_cat']
+                if not sec_iniciada[cat]:
+                    titulo, divider = SEC_INFO[cat]
+                    if divider:
+                        st.divider()
+                    st.markdown(titulo)
+                    sec_iniciada[cat] = True
 
-                # Ícone e Cor baseados no saldo e status
+                # Badge
                 valor_ref = row['valor_pago'] if row['valor_pago'] > 0.01 else row['valor_bruto']
-                if row['_quitado']:
+                if cat == 2:
                     badge = f"🟢 QUITADO | R$ {valor_ref:,.2f} pago"
+                elif cat == 1:
+                    qtd_pago = (det['status_pagamento'] == 'Pago').sum()
+                    badge = f"🔵 EM PROCESSO | {qtd_pago}/{len(det)} lançamentos pagos"
                 elif row['valor_pago'] > 0:
                     badge = f"🟡 PARCIAL | Pago R$ {row['valor_pago']:,.2f} | Falta R$ {saldo_grupo:,.2f}"
                 else:
