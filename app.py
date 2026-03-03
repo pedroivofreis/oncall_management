@@ -1385,17 +1385,20 @@ elif selected_tab == "💸 Pagamentos":
                             ratio = (novo_valor_pago / total_bruto_grupo) if total_bruto_grupo > 0 else 0
 
                             # Usa engine direto (conn._instance) para garantir commit no PostgreSQL
+                            # id é UUID PRIMARY KEY — passa objeto uuid.UUID para psycopg2
+                            # enviar como str causa tipo VARCHAR vs UUID e 0 rows afetadas
                             rows_updated = 0
                             with conn._instance.connect() as db_conn:
                                 for _, det_row in det.iterrows():
                                     vp = float(det_row['valor_bruto']) * ratio
+                                    id_uuid = det_row['id'] if isinstance(det_row['id'], uuid.UUID) else uuid.UUID(str(det_row['id']).strip())
                                     result = db_conn.execute(
                                         text(
                                             "UPDATE lancamentos "
                                             "SET status_pagamento=:s, observacao_financeira=:o, valor_pago=:vp "
                                             "WHERE id=:id"
                                         ),
-                                        {"s": ns, "o": nova_obs, "vp": vp, "id": str(det_row['id']).strip()}
+                                        {"s": ns, "o": nova_obs, "vp": vp, "id": id_uuid}
                                     )
                                     rows_updated += result.rowcount
                                 db_conn.commit()
