@@ -1350,7 +1350,7 @@ elif selected_tab == "💸 Pagamentos":
                                                 valor_pago=(horas * valor_hora_historico * :rat)
                                             WHERE id=:id
                                         """),
-                                        {"s": ns, "o": nova_obs, "rat": ratio, "id": id_val}
+                                        {"s": ns, "o": nova_obs, "rat": ratio, "id": str(id_val)}
                                     )
                                 s.commit()
                             
