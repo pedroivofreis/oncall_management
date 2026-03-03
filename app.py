@@ -1271,10 +1271,12 @@ elif selected_tab == "💸 Pagamentos":
                 'valor_bruto': 'sum',
                 'valor_pago': 'sum',
                 'saldo': 'sum',
-                'horas': 'sum'
+                'horas': 'sum',
+                'status_pagamento': 'first'   # status do primeiro lançamento do grupo
             }).reset_index()
-            # Separa quitados (saldo ≤ 0.01) dos pendentes, mantendo competência desc dentro de cada grupo
-            df_g['_quitado'] = df_g['saldo'] <= 0.01
+            # Quitado = saldo zerado OU status explicitamente 'Pago'
+            # (cobre casos onde valor_pago ficou 0 por bug mas status já foi marcado como Pago)
+            df_g['_quitado'] = (df_g['saldo'] <= 0.01) | (df_g['status_pagamento'] == 'Pago')
             df_g = df_g.sort_values(['_quitado', 'competencia'], ascending=[True, False])
 
             secao_pendente_iniciada = False
@@ -1299,9 +1301,10 @@ elif selected_tab == "💸 Pagamentos":
                     st.markdown("#### 🟢 Quitados")
                     secao_quitado_iniciada = True
 
-                # Ícone e Cor baseados no saldo
-                if saldo_grupo <= 0.01:
-                    badge = f"🟢 QUITADO | R$ {row['valor_pago']:,.2f} pago"
+                # Ícone e Cor baseados no saldo e status
+                valor_ref = row['valor_pago'] if row['valor_pago'] > 0.01 else row['valor_bruto']
+                if row['_quitado']:
+                    badge = f"🟢 QUITADO | R$ {valor_ref:,.2f} pago"
                 elif row['valor_pago'] > 0:
                     badge = f"🟡 PARCIAL | Pago R$ {row['valor_pago']:,.2f} | Falta R$ {saldo_grupo:,.2f}"
                 else:
