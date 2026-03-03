@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, date
 import uuid
 import time
 import io
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO INICIAL DA PÁGINA E META-DADOS
@@ -393,9 +393,10 @@ else:
 
 # O rádio funciona independente
 selected_radio = st.sidebar.radio(
-    "Ir para:", 
-    app_menu_options, 
-    index=app_menu_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in app_menu_options else 0
+    "Ir para:",
+    app_menu_options,
+    index=app_menu_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in app_menu_options else 0,
+    key="main_nav_radio"
 )
 
 # --- A MÁGICA DA PRECEDÊNCIA ---
@@ -601,8 +602,9 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
         lista_adm_completa = [f"{current_user_name} ({current_user_email})"] + lista_outros
         
         sel_admin_val = c_sel_admin.selectbox(
-            "👁️ (Admin) Visualizar Painel de:", 
+            "👁️ (Admin) Visualizar Painel de:",
             lista_adm_completa,
+            key="admin_painel_selector",
             help="Selecione um colaborador para auditar."
         )
         
@@ -620,9 +622,10 @@ elif "Painel" in selected_tab or "Gestão" in selected_tab:
     c_f1, c_f2 = st.columns([1, 3])
     
     comp_selecionadas = c_f1.multiselect(
-        "📅 Filtrar Competência(s):", 
-        all_competencias, 
-        default=all_competencias[:1] if all_competencias else None
+        "📅 Filtrar Competência(s):",
+        all_competencias,
+        default=all_competencias[:1] if all_competencias else None,
+        key="comp_sel_painel"
     )
     
     df_painel = df_lancamentos[df_lancamentos["colaborador_email"] == target_email].copy()
@@ -1340,20 +1343,19 @@ elif selected_tab == "💸 Pagamentos":
                                 
                                 # 1. Atualiza Status e Obs
                                 s.execute(
-                                    text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids"), 
-                                    {"s": ns, "ids": ids_u, "o": nova_obs}
+                                    text("UPDATE lancamentos SET status_pagamento=:s, observacao_financeira=:o WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+                                    {"s": ns, "ids": list(ids_u), "o": nova_obs}
                                 )
-                                
+
                                 # 2. Atualiza Valor Pago Proporcionalmente (SQL Matemático)
                                 # valor_pago = (horas * valor_hora_historico) * ratio
-                                # Convertemos horas (NUMERIC) para float no calculo se precisar, mas o banco trata bem
                                 s.execute(
                                     text("""
-                                        UPDATE lancamentos 
+                                        UPDATE lancamentos
                                         SET valor_pago = (horas * valor_hora_historico * :rat)
                                         WHERE id IN :ids
-                                    """),
-                                    {"rat": ratio, "ids": ids_u}
+                                    """).bindparams(bindparam("ids", expanding=True)),
+                                    {"rat": ratio, "ids": list(ids_u)}
                                 )
                                 s.commit()
                             
