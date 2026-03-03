@@ -371,6 +371,12 @@ st.sidebar.divider()
 # Inicializa o estado mestre
 if 'selected_tab' not in st.session_state:
     st.session_state.selected_tab = "📝 Lançamentos"
+if 'radio_clicked' not in st.session_state:
+    st.session_state.radio_clicked = False
+
+def _on_radio_change():
+    """Sinaliza que o usuário clicou explicitamente no radio."""
+    st.session_state.radio_clicked = True
 
 # --- BOTÃO MINIMALISTA: BI ESTRATÉGICO (SOMENTE ADMIN) ---
 # Aqui usamos um gatilho temporário
@@ -391,21 +397,30 @@ if is_admin_session:
 else:
     app_menu_options = ["📝 Lançamentos", "🗂️ Histórico Pessoal", "📊 Meu Painel", "🧾 Notas Fiscais"]
 
-# O rádio funciona independente
+# O rádio funciona independente; on_change detecta clique explícito do usuário
 selected_radio = st.sidebar.radio(
     "Ir para:",
     app_menu_options,
     index=app_menu_options.index(st.session_state.selected_tab) if st.session_state.selected_tab in app_menu_options else 0,
-    key="main_nav_radio"
+    key="main_nav_radio",
+    on_change=_on_radio_change
 )
 
-# --- A MÁGICA DA PRECEDÊNCIA ---
-# Se o botão foi clicado, ele SOBRESCREVE o rádio nesta rodada.
+# Lê e reseta o flag de clique no radio
+radio_clicked = st.session_state.radio_clicked
+st.session_state.radio_clicked = False
+
+# --- PRECEDÊNCIA DE NAVEGAÇÃO ---
+# Botão BI > clique explícito no radio > manter aba BI > radio normal
 if btn_bi:
     selected_tab = "📈 BI Estratégico"
     st.session_state.selected_tab = "📈 BI Estratégico"
+elif radio_clicked:
+    # Usuário clicou explicitamente no menu → sai do BI se estava lá
+    selected_tab = selected_radio
+    st.session_state.selected_tab = selected_radio
 elif st.session_state.selected_tab == "📈 BI Estratégico":
-    # Mantém na aba BI se o usuário interagiu com um widget (btn_bi=False mas tab não mudou)
+    # Widget da página BI disparou re-run, mas radio não foi clicado → mantém BI
     selected_tab = "📈 BI Estratégico"
 else:
     selected_tab = selected_radio
