@@ -1348,33 +1348,29 @@ elif selected_tab == "💸 Pagamentos":
                     # BOTÃO DE ATUALIZAR
                     if c_up3.button("Salvar Baixa", key=f"btn_{idx}", type="primary"):
                         try:
-                            with conn.session as s:
-                                total_bruto_grupo = row['valor_bruto']
+                            total_bruto_grupo = row['valor_bruto']
+                            ratio = (novo_valor_pago / total_bruto_grupo) if total_bruto_grupo > 0 else 0
 
-                                # Cálculo da Proporção (Ratio) para distribuir o valor pago entre os itens
-                                # Evita divisão por zero
-                                if total_bruto_grupo > 0:
-                                    ratio = novo_valor_pago / total_bruto_grupo
-                                else:
-                                    ratio = 0
-
-                                # Atualiza Status, Obs e Valor Pago em um único UPDATE por linha
-                                # valor_pago calculado em Python (valor_bruto já usa h_dec, evita erro se horas é texto)
+                            # Usa engine direto (conn._instance) para garantir commit no PostgreSQL
+                            rows_updated = 0
+                            with conn._instance.connect() as db_conn:
                                 for _, det_row in det.iterrows():
                                     vp = float(det_row['valor_bruto']) * ratio
-                                    s.execute(
-                                        text("""
-                                            UPDATE lancamentos
-                                            SET status_pagamento=:s,
-                                                observacao_financeira=:o,
-                                                valor_pago=:vp
-                                            WHERE id=:id
-                                        """),
-                                        {"s": ns, "o": nova_obs, "vp": vp, "id": str(det_row['id'])}
+                                    result = db_conn.execute(
+                                        text(
+                                            "UPDATE lancamentos "
+                                            "SET status_pagamento=:s, observacao_financeira=:o, valor_pago=:vp "
+                                            "WHERE id=:id"
+                                        ),
+                                        {"s": ns, "o": nova_obs, "vp": vp, "id": str(det_row['id']).strip()}
                                     )
-                                s.commit()
-                            
-                            st.toast("Financeiro atualizado com sucesso!")
+                                    rows_updated += result.rowcount
+                                db_conn.commit()
+
+                            if rows_updated > 0:
+                                st.toast(f"✅ {rows_updated} linha(s) atualizada(s)!")
+                            else:
+                                st.warning("⚠️ Nenhuma linha foi atualizada. Verifique os dados.")
                             time.sleep(0.5)
                             st.rerun()
                         except Exception as e:
