@@ -404,6 +404,9 @@ selected_radio = st.sidebar.radio(
 if btn_bi:
     selected_tab = "📈 BI Estratégico"
     st.session_state.selected_tab = "📈 BI Estratégico"
+elif st.session_state.selected_tab == "📈 BI Estratégico":
+    # Mantém na aba BI se o usuário interagiu com um widget (btn_bi=False mas tab não mudou)
+    selected_tab = "📈 BI Estratégico"
 else:
     selected_tab = selected_radio
     st.session_state.selected_tab = selected_radio
@@ -1372,7 +1375,7 @@ elif selected_tab == "📈 BI Estratégico":
     st.subheader("📈 Inteligência de Negócios")
     
     comps = sorted(df_lancamentos['competencia'].astype(str).unique(), reverse=True) if not df_lancamentos.empty else []
-    sel_bi = st.multiselect("Filtrar Competências:", comps, default=comps[:2] if comps else None)
+    sel_bi = st.multiselect("Filtrar Competências:", comps, default=comps[:2] if comps else None, key="bi_comp_filter")
     
     df_bi = df_lancamentos.copy()
     if sel_bi and not df_bi.empty:
