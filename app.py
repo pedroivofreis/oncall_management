@@ -1344,16 +1344,18 @@ elif selected_tab == "💸 Pagamentos":
                                     ratio = 0
 
                                 # Atualiza Status, Obs e Valor Pago em um único UPDATE por linha
-                                for id_val in det['id'].tolist():
+                                # valor_pago calculado em Python (valor_bruto já usa h_dec, evita erro se horas é texto)
+                                for _, det_row in det.iterrows():
+                                    vp = float(det_row['valor_bruto']) * ratio
                                     s.execute(
                                         text("""
                                             UPDATE lancamentos
                                             SET status_pagamento=:s,
                                                 observacao_financeira=:o,
-                                                valor_pago=(horas * valor_hora_historico * :rat)
+                                                valor_pago=:vp
                                             WHERE id=:id
                                         """),
-                                        {"s": ns, "o": nova_obs, "rat": ratio, "id": str(id_val)}
+                                        {"s": ns, "o": nova_obs, "vp": vp, "id": str(det_row['id'])}
                                     )
                                 s.commit()
                             
